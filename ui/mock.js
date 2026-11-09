@@ -95,6 +95,9 @@ if (!window.__TAURI__) {
           case "common_ports": return [[22, "SSH"], [80, "HTTP (web)"], [443, "HTTPS (web)"], [445, "SMB (file sharing)"], [631, "IPP printing"], [3389, "RDP (Remote Desktop)"], [9100, "Printer (JetDirect)"]];
           case "device_banners": await new Promise(r => setTimeout(r, 600)); return Object.fromEntries(args.ports.filter(p => [22, 80].includes(p)).map(p => [p, p === 22 ? "OpenSSH 9.6" : "nginx"]));
           case "device_web_title": return null;
+          case "update_check": await new Promise(r => setTimeout(r, 500)); return { version: "1.1.0", current: "1.0.2", newer: true, whatsNew: "Quiet scan.", url: "https://github.com/example/setup.exe", sha256: "0".repeat(64) };
+          case "update_download": await new Promise(r => setTimeout(r, 800)); return "C:\\Users\\demo\\Downloads\\ARPradar-1.1.0-setup.exe";
+          case "update_run_installer": console.log("demo: would start the installer"); return;
           case "list_shares": await new Promise(r => setTimeout(r, 800)); return args.ip.endsWith(".10") ? { smb: [{ name: "Backups", comment: "Nightly" }, { name: "Media", comment: "" }], nfs: [], problem: null } : { smb: [], nfs: [], problem: "Needs a login" };
           case "open_device": console.log("demo open", args); return;
           case "wake_on_lan": return args.macs.length;

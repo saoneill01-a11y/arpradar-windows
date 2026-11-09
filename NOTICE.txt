@@ -21,8 +21,8 @@ Your data
    finds stays on your computer unless you export or share it. Some features contact
    other services, only when you use them: Public IP (api.ipify.org), domain expiry
    (rdap.org), subdomain search (crt.sh, Cert Spotter), speed test (Cloudflare's speed-test
-   servers), and your own UniFi controller for the network map. Their own terms apply
-   to them.
+   servers), Check for Updates (api.github.com, and github.com for the download), and your
+   own UniFi controller for the network map. Their own terms apply to them.
 
 Third-party parts
    ARPradar includes the IEEE's public list of network vendor codes (OUI).

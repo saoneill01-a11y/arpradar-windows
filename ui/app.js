@@ -944,7 +944,7 @@ function menuItems(name) {
     ];
   }
   if (name === "tools") return TOOL_LIST.filter(t => advanced() || !t.advanced).map(t => ({ label: t.label, key: `Ctrl+${t.n}`, run: () => openTool(t.tool) }));
-  if (name === "help") return [{ label: "ARPradar Help", key: "F1", run: () => openTool("help") }, { sep: true }, { label: "License", run: licenseDialog }, { label: "About ARPradar", run: aboutDialog }];
+  if (name === "help") return [{ label: "ARPradar Help", key: "F1", run: () => openTool("help") }, { sep: true }, { label: "Check for Updates…", run: updateDialog }, { label: "License", run: licenseDialog }, { label: "About ARPradar", run: aboutDialog }];
   return [];
 }
 
@@ -1019,6 +1019,31 @@ function aboutDialog() {
   m.el.querySelector(".primary").onclick = m.close;
   m.el.querySelector("[data-license]").onclick = () => { m.close(); licenseDialog(); };
 }
+/// Help › Check for Updates…: asks GitHub (only when clicked), downloads the installer into Downloads, checks its
+/// SHA-256 against the release notes, and can start it (ARPradar closes so it can be replaced).
+async function updateDialog() {
+  const m = modal(`<h2>Check for Updates</h2><div id="up-body"><p><span class="spinner"></span> Checking for updates…</p></div><div class="buttons" id="up-buttons"></div>`);
+  const body = m.el.querySelector("#up-body"), buttons = m.el.querySelector("#up-buttons");
+  const show = (html, btns) => {
+    body.innerHTML = html;
+    buttons.innerHTML = btns.map(([label, primary], i) => `<button type="button" data-i="${i}" ${primary ? 'class="primary"' : ""}>${esc(label)}</button>`).join("");
+    buttons.querySelectorAll("[data-i]").forEach(b => b.onclick = () => btns[b.dataset.i][2]());
+  };
+  const failed = why => show(`<p><b>Couldn’t update</b></p><p class="note">${esc(why)}</p>`, [["Close", false, m.close], ["Try Again", true, () => { m.close(); updateDialog(); }]]);
+  let r;
+  try { r = await invoke("update_check"); } catch (e) { return failed(String(e)); }
+  if (!r.newer) return show(`<p><b>You’re up to date</b></p><p class="note">ARPradar ${esc(r.current)} is the latest version.</p>`, [["OK", true, m.close]]);
+  show(`<p><b>ARPradar ${esc(r.version)} is available</b></p><p class="note">You have ${esc(r.current)}.</p>${r.whatsNew ? `<p class="note">What’s new: ${esc(r.whatsNew)}</p>` : ""}`,
+    [["Later", false, m.close], ["Download", true, async () => {
+      show(`<p><span class="spinner"></span> Downloading ARPradar ${esc(r.version)} and checking it…</p>`, []);
+      let path;
+      try { path = await invoke("update_download", { url: r.url, sha256: r.sha256, version: r.version }); } catch (e) { return failed(String(e)); }
+      show(`<p><b>ARPradar ${esc(r.version)} is downloaded</b></p><p class="note">Saved as <span class="mono">${esc(path)}</span>. It matches the checksum in the release notes.</p>
+        <p class="note">Run Installer closes ARPradar and starts the setup. Windows may ask More info › Run anyway.</p>`,
+        [["Later", false, m.close], ["Run Installer", true, async () => { try { await invoke("update_run_installer"); } catch (e) { failed(String(e)); } }]]);
+    }]]);
+}
+
 /// Help › License: the GPL notice and full text (ui/license.js, from NOTICE.txt), also the installer.s license page.
 function licenseDialog() {
   const text = typeof LICENSE_TEXT === "string" ? LICENSE_TEXT : "© 2026 Sean O'Neill. Free software under the GNU GPL v3.";

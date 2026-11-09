@@ -16,6 +16,7 @@ mod snmpwalk;
 mod sys;
 mod tools;
 mod unifi;
+mod updates;
 mod wifi;
 
 use serde::Serialize;
@@ -45,6 +46,33 @@ fn list_adapters() -> Vec<sys::Adapter> {
 #[tauri::command]
 fn parse_range(text: String) -> Result<Vec<(u32, u32)>, String> {
     range::spans(&text)
+}
+
+/// The installer Check for Updates downloaded and checked (the only file "Run Installer" will start).
+#[derive(Default)]
+struct DownloadedUpdate(Mutex<Option<std::path::PathBuf>>);
+
+/// Help › Check for Updates…: the latest release on GitHub (asked only when clicked).
+#[tauri::command]
+async fn update_check() -> Result<updates::Release, String> {
+    tauri::async_runtime::spawn_blocking(updates::check).await.map_err(|e| e.to_string())?
+}
+
+/// Downloads the installer into Downloads and checks its SHA-256. Returns where it was saved.
+#[tauri::command]
+async fn update_download(state: tauri::State<'_, DownloadedUpdate>, url: String, sha256: String, version: String) -> Result<String, String> {
+    let path = tauri::async_runtime::spawn_blocking(move || updates::download(&url, &sha256, &version)).await.map_err(|e| e.to_string())??;
+    *state.0.lock().unwrap() = Some(path.clone());
+    Ok(path.display().to_string())
+}
+
+/// Starts the downloaded installer and closes ARPradar so it can be replaced.
+#[tauri::command]
+fn update_run_installer(app: tauri::AppHandle, state: tauri::State<DownloadedUpdate>) -> Result<(), String> {
+    let path = state.0.lock().unwrap().clone().ok_or("Download the update first.")?;
+    std::process::Command::new(&path).spawn().map_err(|e| format!("Couldn\u{2019}t start the installer: {e}"))?;
+    app.exit(0);
+    Ok(())
 }
 
 /// The scan that's running, if any: its Stop switch.
@@ -748,6 +776,7 @@ fn main() {
             }
         })
         .manage(Running::default())
+        .manage(DownloadedUpdate::default())
         .manage(PortScans::default())
         .manage(Jobs::default())
         .invoke_handler(tauri::generate_handler![
@@ -763,6 +792,9 @@ fn main() {
             export_xlsx,
             device_banners,
             device_web_title,
+            update_check,
+            update_download,
+            update_run_installer,
             list_shares,
             common_ports,
             port_scan_start,
