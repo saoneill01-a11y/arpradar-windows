@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "arpradar"
-version = "1.0.2"
+version = "1.1.0"
 dependencies = [
  "dns-lookup",
  "keyring",
