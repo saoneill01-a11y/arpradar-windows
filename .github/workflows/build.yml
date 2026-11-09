@@ -36,6 +36,7 @@ jobs:
           key: tauri-tools-nsis-3.13
       # The map's pure parts (SNMP layout and merge, UniFi parsing): plain Node, a second or two.
       - run: node tests/netmap.test.js
+      - run: node --test tests/surveyrange.test.js
       - run: npm install --no-audit --no-fund
       # Tries again if a download fails; the second try reuses what was compiled.
       - run: |

@@ -1495,6 +1495,19 @@ async function surveySetupDialog(orgId) {
     q("#sv-go").disabled = !steps().length || ui.scanning || surveyRunning;
   };
   m.el.addEventListener("input", refresh); m.el.addEventListener("change", refresh); refresh();
+  // The IP range covers the organization's network (from its DHCP range or name server) unless this PC is on it,
+  // until the range is typed by hand.
+  const thisNetwork = q("#sv-range").value;
+  let rangeEdited = false;
+  const followOrgNetwork = () => {
+    if (rangeEdited) return;
+    const saved = org ? filledFromScans(org, data.sites) : { nameServer: "", dhcpRange: "" };
+    q("#sv-range").value = SurveyRange.suggested(thisNetwork, q("#sv-dhcp").value.trim() || saved.dhcpRange, q("#sv-ns").value.trim() || saved.nameServer);
+  };
+  q("#sv-range").addEventListener("input", () => { rangeEdited = true; });
+  q("#sv-dhcp").addEventListener("input", followOrgNetwork);
+  q("#sv-ns").addEventListener("input", followOrgNetwork);
+  followOrgNetwork();
   q("[data-no]").onclick = m.close;
   /// Makes the organization and/or saved scan; returns [orgId, siteId] or null with an error shown.
   const commit = async () => {
