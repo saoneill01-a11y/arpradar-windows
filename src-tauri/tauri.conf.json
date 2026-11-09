@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ARPradar",
+  "version": "1.0.0",
+  "identifier": "com.arpradar.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "ARPradar",
+        "width": 1200,
+        "height": 720,
+        "minWidth": 900,
+        "minHeight": 500,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Sean O'Neill",
+    "shortDescription": "Network scanner",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "displayLanguageSelector": false
+      }
+    },
+    "copyright": "© 2026 Sean O'Neill. Free software under the GNU GPL v3.",
+    "longDescription": "ARPradar finds every device on a network: names, MAC addresses, makers, open ports and more. Free; nothing leaves your PC.",
+    "homepage": "https://arpradar.com",
+    "licenseFile": "../NOTICE.txt"
+  }
+}

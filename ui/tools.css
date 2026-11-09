@@ -1,0 +1,75 @@
+/* Tool windows (Ping, Traceroute, DNS Lookup, Wi-Fi, Connection Info, Speed Test, Subnet Calculator). */
+body.tool { overflow: auto; }
+.toolpage { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; min-height: 100%; }
+.toolpage h1 { margin: 0; font-size: 16px; }
+.bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.bar .field input, .bar .field select { height: 30px; }
+.bar .grow { flex: 1; min-width: 160px; }
+.bar button, .toolpage .btn { height: 30px; padding: 0 14px; border: 1px solid var(--edge); border-radius: 5px; background: var(--input); }
+.bar button.primary, .toolpage .btn.primary { background: var(--green); color: var(--on-green); border-color: var(--green); font-weight: 600; }
+.bar button.stop { background: var(--red); border-color: var(--red); color: #fff; }
+.note { color: var(--muted); font-size: 12px; margin: 0; }
+.problem { color: var(--red); margin: 0; }
+.status { color: var(--muted); }
+.tablebox { border: 1px solid var(--edge); border-radius: 5px; overflow: auto; background: var(--bg); flex: 1; min-height: 120px; }
+.tt { width: 100%; border-collapse: collapse; user-select: text; -webkit-user-select: text; }
+.tt th { position: sticky; top: 0; background: var(--head); color: var(--headtext); text-align: left; padding: 6px 8px; font-weight: 600; white-space: nowrap; }
+.tt td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tt td.num, .tt th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tt td.mono { font-family: Consolas, "Cascadia Mono", Menlo, monospace; font-size: 12px; word-break: break-all; }
+.tt tr.child td { color: var(--muted); }
+.tt .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.chart { width: 100%; height: 220px; border: 1px solid var(--edge); border-radius: 5px; background: var(--bg); display: block; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; user-select: text; -webkit-user-select: text; }
+.kv dt { color: var(--muted); text-align: right; }
+.kv dd { margin: 0; word-break: break-word; }
+.kv dd.mono { font-family: Consolas, "Cascadia Mono", Menlo, monospace; font-size: 12px; }
+.big { display: flex; flex-wrap: wrap; gap: 12px; }
+.big .tile { flex: 1; min-width: 130px; border: 1px solid var(--edge); border-radius: 8px; padding: 10px 14px; background: var(--panel); }
+.big .tile .label { color: var(--muted); font-size: 11px; }
+.big .tile .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.big .tile .unit { font-size: 13px; color: var(--muted); margin-left: 3px; font-weight: 400; }
+.good { color: var(--green-hi); } .fair { color: #f5b942; } .poor { color: var(--red); }
+.callout { border: 1px solid var(--edge); border-radius: 6px; padding: 10px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+
+/* Settings */
+.settings { display: flex; flex-direction: column; gap: 10px; }
+.settings .note { margin-top: -6px; margin-left: 24px; }
+.settings .field .note { margin-left: 0; }
+.themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.theme { display: grid; grid-template-columns: 34px 1fr; grid-template-rows: auto auto; column-gap: 8px; text-align: left; padding: 8px; border: 1px solid var(--edge); border-radius: 8px; background: var(--input); }
+.theme.on { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.theme .sw { grid-row: span 2; width: 34px; height: 34px; border-radius: 6px; }
+.theme small { color: var(--muted); }
+.sw-radar { background: linear-gradient(135deg, #0e1b2c 50%, #2fd17a 50%); }
+.sw-ocean { background: linear-gradient(135deg, #0f1f26 50%, #3cc3dd 50%); }
+.sw-sunset { background: linear-gradient(135deg, #231a14 50%, #ff9a3c 50%); }
+.sw-graphite { background: linear-gradient(135deg, #1b1b1c 50%, #a1a1aa 50%); }
+.sw-contrast { background: linear-gradient(135deg, #000 50%, #ffd400 50%); border: 1px solid #888; }
+.settings .segmented { align-self: flex-start; }
+.tt tr.sel td { background: var(--select); }
+.chip { padding: 3px 10px; border-radius: 12px; font-size: 12px; }
+.chipgood { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-hi); }
+.chipwarn { background: color-mix(in srgb, #f5b942 18%, transparent); color: #f5b942; }
+.chipbad { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+.dnspanel { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+/* DNS Lookup: each tab's mark after Check all (… running, ✓ done, ⚠ something to look at). */
+#dtabs .mark { margin-left: 6px; }
+#dtabs .mark.done { color: var(--green-hi); }
+#dtabs .mark.warn { color: #f5b942; }
+#dtabs .mark.running { color: var(--muted); }
+/* Organizations: the Settings box (domains, name server, DHCP range, notes). */
+.orgsettings { border: 1px solid var(--edge); border-radius: 8px; padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.orgsettings legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+/* DNS Look Up: one outlined box per record type with a darker heading that folds it. */
+.dnsbox { display: flex; flex-direction: column; gap: 10px; padding: 2px; border: 0 !important; background: none !important; }
+.dnsgroup { border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; flex: none; }
+.dnshead { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; padding: 6px 10px; font-weight: 600;
+  background: color-mix(in srgb, var(--text) 12%, var(--panel)); color: var(--text); cursor: pointer; }
+.dnshead .chev { color: var(--muted); width: 10px; }
+.dnsgroup.folded .dnshead { border-bottom: 0; }
+.dnsg { width: 100%; table-layout: fixed; }
+.dnsg td { word-break: break-word; }
+.dnsg td.ttl { color: var(--muted); }
+.dnsg tr.child td { color: var(--muted); }
+.typetag { display: inline-block; margin-right: 6px; padding: 0 4px; border: 1px solid var(--edge); border-radius: 3px; font-size: 10px; font-family: inherit; color: var(--muted); }

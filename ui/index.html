@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARPradar</title>
+<link rel="stylesheet" href="style.css">
+<script src="look.js"></script>
+</head>
+<body>
+<nav class="menubar" aria-label="Menu">
+  <button type="button" data-menu="file">File</button>
+  <button type="button" data-menu="view">View</button>
+  <button type="button" data-menu="tools">Tools</button>
+  <button type="button" data-menu="help">Help</button>
+</nav>
+
+<header class="scanbar">
+  <button type="button" id="scan" class="scan" title="Scan the IP range (Ctrl+Enter)">
+    <svg id="scan-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 1 L11 6 L2 11 Z" fill="currentColor"/></svg>
+    <span id="scan-label">Scan</span>
+  </button>
+  <button type="button" id="newscan" class="newscan" title="Start over: an empty list on this PC’s network, not saved (Ctrl+N)" aria-label="New Scan">
+    <span aria-hidden="true">+</span><span class="wide-only">New Scan</span>
+  </button>
+  <div class="rangegrid">
+    <label for="range">IP range</label>
+    <input id="range" class="mono entry" value="" placeholder="192.168.1.1-254, 10.0.0.0/24" spellcheck="false">
+    <label for="adapter" class="advanced-only">Network adapter</label>
+    <div class="row advanced-only">
+      <select id="adapter" title="The network adapter (Wi-Fi, Ethernet, USB, VPN) and its subnet"></select>
+      <button type="button" id="adapter-refresh" class="iconbtn" title="Refresh the adapter list" aria-label="Refresh adapter list">&#x21bb;</button>
+    </div>
+  </div>
+  <div class="searchbox">
+    <label for="search">Search</label>
+    <input id="search" class="entry" type="search" placeholder="Name, IP, MAC, vendor, port" spellcheck="false">
+  </div>
+  <div class="savedscans">
+    <span class="label wide-only" id="scans-label">Saved Scans</span>
+    <button type="button" id="scans" class="picker" data-menu="scans" aria-label="Saved Scans" title="Saved scans: pick one to scan that network again. Each keeps its own devices, so two networks with the same subnet don’t mix.">
+      <span id="scans-name">Open a saved scan</span><span class="caret">&#x25BE;</span>
+    </button>
+  </div>
+  <div class="spacer"></div>
+  <div class="segmented" role="group" aria-label="Mode">
+    <button type="button" data-mode="basic">Basic</button>
+    <button type="button" data-mode="advanced">Advanced</button>
+  </div>
+  <div id="radar" class="radar wide-only" aria-hidden="true">
+    <svg viewBox="0 0 200 200" width="40" height="40">
+      <rect x="4" y="4" width="192" height="192" rx="43" fill="#0e1b2c"/>
+      <circle cx="100" cy="100" r="68" fill="none" stroke="#2fd17a" stroke-opacity="0.35" stroke-width="3"/>
+      <circle cx="100" cy="100" r="45" fill="none" stroke="#2fd17a" stroke-opacity="0.35" stroke-width="3"/>
+      <circle cx="100" cy="100" r="22" fill="none" stroke="#2fd17a" stroke-opacity="0.35" stroke-width="3"/>
+      <g class="sweep">
+        <path d="M100 100 L100 32 A68 68 0 0 1 158.9 66 Z" fill="#2fd17a" fill-opacity="0.35"/>
+        <line x1="100" y1="100" x2="158.9" y2="66" stroke="#2fd17a" stroke-width="4" stroke-linecap="round"/>
+      </g>
+      <circle cx="138" cy="60" r="7" fill="#7dffb2"/>
+      <circle cx="64" cy="128" r="6" fill="#2fd17a"/>
+      <circle cx="122" cy="140" r="5" fill="#2fd17a"/>
+      <circle cx="100" cy="100" r="6" fill="#2fd17a"/>
+    </svg>
+  </div>
+</header>
+
+<div class="tabbar">
+  <div class="segmented" role="tablist" aria-label="View">
+    <button type="button" role="tab" data-tab="results">Results</button>
+    <button type="button" role="tab" data-tab="favorites" id="tab-favorites">Favorites</button>
+    <button type="button" role="tab" data-tab="history" class="advanced-only">History</button>
+  </div>
+  <div class="segmented advanced-only" role="tablist" aria-label="Map">
+    <button type="button" role="tab" data-tab="map" title="The network map (switches, access points and what’s plugged into them)">Map</button>
+  </div>
+</div>
+
+<div id="serverbar" class="savebar serverbar" hidden>
+  <span id="serverbar-text"></span>
+  <button type="button" id="serverbar-use" class="primary"></button>
+  <button type="button" id="serverbar-no">Not Now</button>
+</div>
+
+<div id="savebar" class="savebar" hidden>
+  <span>Save this scan to remember its devices: next time you'll see which are offline (red) and which are NEW.</span>
+  <button type="button" id="savebar-org" class="primary">Save to Organization&#x2026;</button>
+  <button type="button" id="savebar-save">Save Standalone&#x2026;</button>
+  <button type="button" id="savebar-no">Not Now</button>
+</div>
+
+<div class="body">
+  <aside id="history" class="history" hidden>
+    <div id="history-list" class="history-list"></div>
+    <div class="history-foot"><button type="button" id="history-open" title="Show this scan in Results, where it stays when you leave History">Open in Results</button><button type="button" id="history-clear">Clear History&#x2026;</button></div>
+  </aside>
+  <main class="tablewrap" id="tablewrap">
+    <table class="devices">
+      <thead><tr id="head"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty">
+      <svg width="72" height="72" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="68" fill="none" stroke="currentColor" stroke-opacity="0.3" stroke-width="3"/><circle cx="100" cy="100" r="45" fill="none" stroke="currentColor" stroke-opacity="0.3" stroke-width="3"/><circle cx="100" cy="100" r="22" fill="none" stroke="currentColor" stroke-opacity="0.3" stroke-width="3"/><circle cx="100" cy="100" r="6" fill="currentColor"/></svg>
+      <div class="empty-title" id="empty-title">No devices yet</div>
+      <div class="empty-text" id="empty-text"></div>
+    </div>
+  </main>
+  <main id="mapview" class="mapview" hidden></main>
+  <div id="detailsgrip" class="grip" hidden title="Drag to make the details panel wider or narrower"></div>
+  <aside id="details" class="details" hidden aria-label="Device details"></aside>
+</div>
+
+<footer class="statusbar">
+  <div id="progress" class="progress" hidden><div id="progress-bar"></div></div>
+  <span id="status" class="grow">Ready</span>
+  <span id="searchchip" class="searchchip" hidden title="The Search box is hiding these rows"><span id="searchchip-text"></span> <button type="button" id="searchchip-clear" class="linkbtn">Show all</button></span>
+  <button type="button" id="forget" class="linkbtn" hidden title="Remove devices that weren’t found this time. Favorites are kept. Asks first.">Forget Offline…</button>
+  <button type="button" id="copyall" class="linkbtn advanced-only" title="Copies the whole list, ready to paste into Excel">Copy</button>
+  <button type="button" id="exportbtn" class="linkbtn">Export…</button>
+  <label class="switch advanced-only" id="dhcpswitch">Mark outside DHCP <input type="checkbox" id="markdhcp"></label>
+  <span id="dhcpchip" class="dhcpchip" hidden></span>
+  <label class="switch">Show offline <input type="checkbox" id="offline"></label>
+  <div class="segmented small" role="group" aria-label="Appearance">
+    <button type="button" data-look="auto">Auto</button>
+    <button type="button" data-look="light">Light</button>
+    <button type="button" data-look="dark">Dark</button>
+  </div>
+</footer>
+
+<div id="menu" class="menu" role="menu" hidden></div>
+<div id="modal-root"></div>
+<script src="mock.js"></script>
+<script src="orgs.js"></script>
+<script src="dnsplus.js"></script>
+<script src="license.js"></script>
+<script src="devicetype.js"></script>
+<script src="netmap.js"></script>
+<script src="mapview.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
