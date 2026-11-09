@@ -53,7 +53,7 @@ struct Running(Mutex<Option<Arc<AtomicBool>>>);
 
 /// Starts a scan in the background; progress arrives as "scan" events. Returns the number of addresses.
 #[tauri::command]
-fn start_scan(app: tauri::AppHandle, state: tauri::State<Running>, range: String, name_server: Option<String>, snmp_community: Option<String>, token: Option<u64>) -> Result<usize, String> {
+fn start_scan(app: tauri::AppHandle, state: tauri::State<Running>, range: String, name_server: Option<String>, snmp_community: Option<String>, quiet: Option<bool>, snmp_in_quiet: Option<bool>, token: Option<u64>) -> Result<usize, String> {
     let targets = range::parse(&range)?;
     let server = match name_server.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(s) => Some(range::ip(s).ok_or_else(|| format!("\u{201c}{s}\u{201d} isn\u{2019}t a valid name server address."))?),
@@ -71,7 +71,12 @@ fn start_scan(app: tauri::AppHandle, state: tauri::State<Running>, range: String
     std::thread::spawn(move || {
         // Every event carries the window's scan number, so a stopped scan's last events can't land in the next one.
         let token = token.unwrap_or(0);
-        scan::run(targets, scan::Options { name_server: server, snmp_community: snmp_community.unwrap_or_else(|| "public".into()) }, cancel, |e| {
+        scan::run(targets, scan::Options {
+            name_server: server,
+            snmp_community: snmp_community.unwrap_or_else(|| "public".into()),
+            quiet: quiet.unwrap_or(false),
+            snmp_in_quiet: snmp_in_quiet.unwrap_or(false),
+        }, cancel, |e| {
             let mut v = serde_json::to_value(&e).unwrap_or_default();
             if let Some(o) = v.as_object_mut() {
                 o.insert("token".into(), token.into());
@@ -170,6 +175,18 @@ async fn device_banners(ip: String, ports: Vec<u16>) -> Result<std::collections:
     tauri::async_runtime::spawn_blocking(move || identify::banners(ip, &ports, std::time::Duration::from_secs(2)))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// The device's web page title, read when the details panel opens (a quiet scan skips web pages).
+#[tauri::command]
+async fn device_web_title(ip: String, ports: Vec<u16>) -> Result<Option<String>, String> {
+    let ip = ip_arg(&ip)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let map = std::collections::HashMap::from([(ip, ports)]);
+        identify::web_titles(&map, &std::sync::atomic::AtomicBool::new(false)).remove(&ip).map(|t| identify::clean_text(&t, 120))
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -745,6 +762,7 @@ fn main() {
             export_csv,
             export_xlsx,
             device_banners,
+            device_web_title,
             list_shares,
             common_ports,
             port_scan_start,

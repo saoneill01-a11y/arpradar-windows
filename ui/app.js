@@ -142,6 +142,8 @@ const ui = {
   dhcp: null,            // {text, spans} of the current saved scan's DHCP range
   hidden: new Set((() => { try { return JSON.parse(load("hiddenColumns", '["response"]')); } catch { return ["response"]; } })()),
   banners: {},           // ip -> {port: text} | "loading", read when the details panel opens
+  quietScan: false,      // Normal / Quiet switch in the scan bar; opening a saved scan sets it from its organization
+  webTitleJobs: new Set(),
   shares: {},            // ip -> {smb, nfs, problem} | "loading"
 };
 let services = new Map(); // port -> what usually runs there
@@ -207,7 +209,9 @@ async function startScan() {
   ui.tab = "results";
   try {
     const token = ++ui.scanToken;
-    const count = await invoke("start_scan", { range, nameServer: ns || null, snmpCommunity: effSnmpCommunity(s), token });
+    // A quiet scan asks SNMP only when this organization (or saved scan) has its own community set.
+    const snmpInQuiet = !!(s && pickSetting(Orgs.org(s.orgID)?.snmpCommunity, s.snmpCommunity));
+    const count = await invoke("start_scan", { range, nameServer: ns || null, snmpCommunity: effSnmpCommunity(s), quiet: ui.quietScan, snmpInQuiet, token });
     setScanning(true);
     scanStarted = Date.now();
     setProgress(0.02, `Scanning ${count} addresses…`);
@@ -441,10 +445,21 @@ async function openHistoryRecord(r) {
 
 // MARK: Saved scans
 
+/// The Normal / Quiet switch in the scan bar.
+function setQuiet(on) {
+  ui.quietScan = !!on;
+  $("quiet").querySelectorAll("[data-q]").forEach(b => b.classList.toggle("on", (b.dataset.q === "1") === ui.quietScan));
+  $("quiet").title = ui.quietScan
+    ? "Quiet: slow pings, 16 connections at a time, 5 ports per device, no web pages (SNMP only with the organization’s own community). About 30–45 s for a /24."
+    : "Normal: everything at full speed, about 10 s for a /24. Quiet sends far less, for networks with an IDS or touchy devices.";
+}
+
 function selectSite(id) {
   if (ui.scanning) return;
   ui.preferredOrgId = null; ui.autoFileOrgId = null; ui.serverOffer = null;
   ui.siteId = id; ui.scanToken++; clearSearch();
+  const org = Orgs.org(data.sites.find(x => x.id === id)?.orgID);
+  if (org) setQuiet(org.quietScan);
   showLastScan();
 }
 /// New Scan (next to Scan, Ctrl+N): an empty list on this PC's network, not saved. From an organization's page,
@@ -457,6 +472,7 @@ function newScan(orgId) {
   ui.netMap = null; ui.currentRecordId = null; ui.mapError = null;
   applyAdapter();
   const o = Orgs.org(orgId);
+  if (o) setQuiet(o.quietScan);
   setProgress(null, o ? `New scan for ${o.name} · press Scan` : "New scan · press Scan");
   render();
 }
@@ -1283,6 +1299,11 @@ function loadExtras(d) {
     invoke("device_banners", { ip, ports: d.openPorts }).then(b => { ui.banners[ip] = b; if (byIp.get(ip)) byIp.get(ip).banners = b; renderDetails(); })
       .catch(() => { ui.banners[ip] = {}; renderDetails(); });
   }
+  // A quiet scan skips web pages, so read the page title here (once per device).
+  if (!d.webTitle && d.openPorts?.length && !ui.webTitleJobs.has(ip)) {
+    ui.webTitleJobs.add(ip);
+    invoke("device_web_title", { ip, ports: d.openPorts }).then(t => { const x = byIp.get(ip); if (t && x) { x.webTitle = t; renderDetails(); } }).catch(() => {});
+  }
   if (!(ip in ui.shares) && (d.openPorts || []).some(p => [139, 445, 2049].includes(p))) {
     ui.shares[ip] = "loading";
     invoke("list_shares", { ip }).then(s => { ui.shares[ip] = s; renderDetails(); })
@@ -1477,7 +1498,7 @@ async function surveySetupDialog(orgId) {
       <div class="field"><label for="sv-range">IP range</label><input id="sv-range" class="mono" value="${esc(adapter?.suggestedRange || $("range").value)}" spellcheck="false"></div>
       <div class="field"><label for="sv-ns">Name server (optional)</label><input id="sv-ns" class="mono" placeholder="e.g. the domain controller" spellcheck="false"></div>
       <div class="field"><label for="sv-dhcp">DHCP range (optional)</label><input id="sv-dhcp" class="mono" placeholder="e.g. 10.0.0.100-10.0.0.199" spellcheck="false"></div></div>
-    <div class="field"><span class="label">Survey</span>${SURVEY_STEPS.map(([k, label]) => `<label class="check"><input type="checkbox" data-step="${k}" checked> ${label}</label>`).join("")}</div>
+    <div class="field"><span class="label">Survey</span>${SURVEY_STEPS.map(([k, label]) => `<label class="check"><input type="checkbox" data-step="${k}" ${k === "speed" && org?.quietScan ? "" : "checked"}> ${label}</label>`).join("")}</div>
     <p class="note" id="sv-note" style="margin:0;font-size:12px"></p>
     <div class="error" id="sv-error"></div>
     <div class="buttons"><button type="button" data-no>Cancel</button>${org ? "" : '<button type="button" id="sv-save">Save Only</button>'}<button type="button" class="primary" id="sv-go">${org ? "Run Survey" : "Save and Run Survey"}</button></div>`, true);
@@ -1924,6 +1945,7 @@ $("offline").addEventListener("change", offlineChanged);
 $("adapter").addEventListener("change", () => { save("adapter", $("adapter").value); if (!currentSite()) applyAdapter(); });
 // Refresh reads the adapter list again. The IP range only changes when the adapter does (or the box is empty),
 // so a range typed by hand survives a refresh.
+$("quiet").addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b && !ui.scanning) setQuiet(b.dataset.q === "1"); });
 $("adapter-refresh").addEventListener("click", async () => {
   const before = $("adapter").value;
   await refreshAdapters();

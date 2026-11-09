@@ -58,6 +58,32 @@ pub enum ScanEvent {
 pub struct Options {
     pub name_server: Option<u32>,
     pub snmp_community: String,
+    /// Quiet scan: see `Plan`.
+    pub quiet: bool,
+    /// In a quiet scan, ask SNMP too (the organization or saved scan has its own community set).
+    pub snmp_in_quiet: bool,
+}
+
+/// What a scan sends, Normal or Quiet (same rules as the Mac's ScanPlan). Quiet trades speed and detail for much
+/// less noise: it still pings every address, but a few at a time, and skips the TCP knock, most ports and web pages.
+#[derive(Debug, PartialEq)]
+pub struct Plan {
+    pub ping_workers: usize,
+    pub knock: bool,
+    pub ports: &'static [u16],
+    pub connections_at_once: usize,
+    pub web_titles: bool,
+    pub snmp: bool,
+}
+
+impl Plan {
+    pub fn new(quiet: bool, snmp_in_quiet: bool) -> Plan {
+        if quiet {
+            Plan { ping_workers: 16, knock: false, ports: &DISCOVERY_PORTS, connections_at_once: 16, web_titles: false, snmp: snmp_in_quiet }
+        } else {
+            Plan { ping_workers: 128, knock: true, ports: &KNOWN_PORTS, connections_at_once: 512, web_titles: true, snmp: true }
+        }
+    }
 }
 
 /// Runs `f` on every item with `workers` threads; collects what it returns.
@@ -97,6 +123,7 @@ fn key(ip: u32) -> String {
 
 pub fn run(targets: Vec<u32>, opts: Options, cancel: Arc<AtomicBool>, report: impl Fn(ScanEvent) + Sync) {
     let stop = || cancel.load(Ordering::Relaxed);
+    let plan = Plan::new(opts.quiet, opts.snmp_in_quiet);
     let target_set: HashSet<u32> = targets.iter().copied().collect();
     let mut alive: HashSet<u32> = HashSet::new();
     let progress = |fraction: f64, text: String| report(ScanEvent::Progress { fraction, text });
@@ -118,9 +145,9 @@ pub fn run(targets: Vec<u32>, opts: Options, cancel: Arc<AtomicBool>, report: im
     }
 
     // 1. Ping
-    progress(0.05, format!("Pinging {} addresses\u{2026}", targets.len()));
+    progress(0.05, if opts.quiet { format!("Quiet scan: pinging {} addresses slowly\u{2026}", targets.len()) } else { format!("Pinging {} addresses\u{2026}", targets.len()) });
     let to_ping: Vec<u32> = targets.iter().copied().filter(|t| !alive.contains(t)).collect();
-    let replies: Vec<(u32, f64)> = par_map(&to_ping, 128, &cancel, |&ip| sys::ping(ip, 1000).map(|ms| (ip, ms)));
+    let replies: Vec<(u32, f64)> = par_map(&to_ping, plan.ping_workers, &cancel, |&ip| sys::ping(ip, 1000).map(|ms| (ip, ms)));
     let mut found: Vec<u32> = replies.iter().map(|r| r.0).collect();
     found.sort();
     alive.extend(&found);
@@ -130,9 +157,11 @@ pub fn run(targets: Vec<u32>, opts: Options, cancel: Arc<AtomicBool>, report: im
         return report(ScanEvent::Finished { cancelled: true });
     }
 
-    // 2. TCP knock on the rest
-    progress(0.35, "Checking devices that ignore ping\u{2026}".into());
-    let rest: Vec<u32> = targets.iter().copied().filter(|t| !alive.contains(t)).collect();
+    // 2. TCP knock on the rest (not in a quiet scan: the ARP table below still finds quiet devices on this subnet)
+    if plan.knock {
+        progress(0.35, "Checking devices that ignore ping\u{2026}".into());
+    }
+    let rest: Vec<u32> = if plan.knock { targets.iter().copied().filter(|t| !alive.contains(t)).collect() } else { Vec::new() };
     let jobs: Vec<(u32, u16)> = rest.iter().flat_map(|&ip| DISCOVERY_PORTS.iter().map(move |&p| (ip, p))).collect();
     let knocked_set = Mutex::new(HashSet::new());
     par_map(&jobs, 384, &cancel, |&(ip, port)| {
@@ -170,8 +199,8 @@ pub fn run(targets: Vec<u32>, opts: Options, cancel: Arc<AtomicBool>, report: im
     let mut alive_list: Vec<u32> = alive.iter().copied().collect();
     alive_list.sort();
     progress(0.72, format!("Checking open ports on {} devices\u{2026}", alive_list.len()));
-    let jobs: Vec<(u32, u16)> = alive_list.iter().flat_map(|&ip| KNOWN_PORTS.iter().map(move |&p| (ip, p))).collect();
-    let open = par_map(&jobs, 512, &cancel, |&(ip, port)| (knock(ip, port, Duration::from_millis(800)) == Some(true)).then_some((ip, port)));
+    let jobs: Vec<(u32, u16)> = alive_list.iter().flat_map(|&ip| plan.ports.iter().map(move |&p| (ip, p))).collect();
+    let open = par_map(&jobs, plan.connections_at_once, &cancel, |&(ip, port)| (knock(ip, port, Duration::from_millis(800)) == Some(true)).then_some((ip, port)));
     let mut port_map: HashMap<u32, Vec<u16>> = HashMap::new();
     for (ip, port) in open {
         port_map.entry(ip).or_default().push(port);
@@ -191,10 +220,12 @@ pub fn run(targets: Vec<u32>, opts: Options, cancel: Arc<AtomicBool>, report: im
     let others: Vec<u32> = alive_list.iter().copied().filter(|ip| !own_macs.contains_key(ip)).collect();
     let other_set: HashSet<u32> = others.iter().copied().collect();
     let (mut upnp_names, mut snmp_names) = (HashMap::new(), HashMap::new());
+    let web_ports: HashMap<u32, Vec<u16>> = if plan.web_titles { port_map.clone() } else { HashMap::new() };
+    let snmp_targets: Vec<u32> = if plan.snmp { others.clone() } else { Vec::new() };
     std::thread::scope(|s| {
-        let web = s.spawn(|| identify::web_titles(&port_map, &cancel));
+        let web = s.spawn(|| identify::web_titles(&web_ports, &cancel));
         let upnp = s.spawn(|| identify::upnp(&other_set, Duration::from_secs(3), &cancel));
-        let snmp = s.spawn(|| identify::snmp(&others, &opts.snmp_community, Duration::from_secs(2), &cancel));
+        let snmp = s.spawn(|| identify::snmp(&snmp_targets, &opts.snmp_community, Duration::from_secs(2), &cancel));
         let ubnt = s.spawn(|| crate::unifi::discover(&others, Duration::from_secs(2), &cancel));
         let v6 = s.spawn(extra::ipv6_neighbors);
 
@@ -287,4 +318,26 @@ fn read_macs(targets: &[u32], own: &HashMap<u32, String>, cancel: &AtomicBool) -
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normal_plan_sends_everything() {
+        let p = Plan::new(false, false);
+        assert!(p.knock && p.web_titles && p.snmp);
+        assert_eq!(p.ports, &KNOWN_PORTS[..]);
+        assert_eq!((p.ping_workers, p.connections_at_once), (128, 512));
+    }
+
+    #[test]
+    fn quiet_plan_sends_less() {
+        let p = Plan::new(true, false);
+        assert!(!p.knock && !p.web_titles && !p.snmp);
+        assert_eq!(p.ports, &[445, 80, 443, 22, 3389][..]);
+        assert_eq!((p.ping_workers, p.connections_at_once), (16, 16));
+        assert!(Plan::new(true, true).snmp);
+    }
 }

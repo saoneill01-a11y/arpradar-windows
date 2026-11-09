@@ -1043,6 +1043,9 @@ async function orgsTool(root, arg) {
         <div class="bar advanced-only" style="align-items:center"><span class="label" style="min-width:auto">UniFi controller</span>
           <span class="note mono grow">${esc(unifi.find(c => c.orgID === o.id)?.address || "None (the Map tab then lists only what the scan finds)")}</span>
           <button type="button" id="ounifi">${unifi.some(c => c.orgID === o.id) ? "Edit…" : "Set Up…"}</button></div>
+        <div class="bar" style="align-items:center"><span class="label" style="min-width:auto">Scan style</span>
+          <div class="segmented small" id="oquiet"><button type="button" data-q="0" class="${o.quietScan ? "" : "on"}">Normal</button><button type="button" data-q="1" class="${o.quietScan ? "on" : ""}">Quiet</button></div>
+          <span class="note grow" style="min-width:0;white-space:normal;overflow:visible;text-overflow:clip">${o.quietScan ? `Every scan and survey for ${esc(o.name)} starts in Quiet: slower, far fewer probes. The survey’s speed test starts unchecked.` : "Quiet sends far fewer probes (for networks with an IDS or touchy devices). You can still switch any scan in the scan bar."}</span></div>
         <div class="field"><label for="ono">Notes</label><textarea id="ono">${esc(o.notes)}</textarea></div></fieldset>
       <div class="field"><span class="label">Scans</span><div>${sitesOf(o.id).map(x => `<button type="button" class="linkbtn" data-site="${esc(x.id)}" title="Open ${esc(x.name)} in the main window">${esc(x.name)}</button> <span class="note mono">${esc(x.range)}</span>`).join("<br>")
         || '<span class="note">None yet: run a survey, or save a scan to this organization (File › Save Scan…).</span>'}</div></div>
@@ -1073,6 +1076,9 @@ async function orgsTool(root, arg) {
     $("ofilter").onclick = e => { const b = e.target.closest("[data-f]"); if (b) { filter = b.dataset.f; picked.clear(); drawDetail(); } };
     $("onscan").onclick = () => act("new-scan-for-org", o.id);
     $("ounifi").onclick = () => act("unifi-setup", o.id);
+    $("oquiet").onclick = e => { const b = e.target.closest("[data-q]"); if (!b) return;
+      const on = b.dataset.q === "1";
+      Orgs.mutate(d => { const x = d.orgs.find(y => y.id === o.id); if (x) x.quietScan = on; }).then(() => { o.quietScan = on; drawDetail(); }); };
     $("onscan").title = `Opens a new scan in the main window. Each time it finishes, it’s saved here.`;
     $("ondns").title = `Each lookup is saved here when it finishes.`;
     // Anything started here is saved to this organization automatically when it finishes.
