@@ -145,10 +145,12 @@ async fn run() -> bluer::Result<()> {
                     uuid: uuid(link::INFO),
                     read: Some(CharacteristicRead {
                         read: true,
-                        fun: Box::new(move |_req| {
+                        fun: Box::new(move |req| {
                             let st = info_state.clone();
                             let id = id.clone();
                             async move {
+                                // A long value is read in pieces: each request asks from `offset` on.
+                                let offset = req.offset as usize;
                                 let s = st.lock().unwrap();
                                 let info = Info {
                                     v: 2,
@@ -160,7 +162,8 @@ async fn run() -> bluer::Result<()> {
                                     nonce: link::hex(&s.nonce),
                                     busy: s.busy,
                                 };
-                                Ok(serde_json::to_vec(&info).unwrap_or_default())
+                                let bytes = serde_json::to_vec(&info).unwrap_or_default();
+                                Ok(bytes.get(offset..).map(<[u8]>::to_vec).unwrap_or_default())
                             }
                             .boxed()
                         }),
