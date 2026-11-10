@@ -30,24 +30,33 @@ mod sys;
 #[path = "../../src-tauri/src/unifi.rs"]
 mod unifi;
 
+mod link;
+#[cfg(target_os = "linux")]
+mod ble;
+#[cfg(target_os = "linux")]
+mod wifi;
+
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 const HELP: &str = "arpradar-sensor (ARPradar, GNU GPL v3)
   scan [RANGE] [--quiet] [--json] [--community NAME] [--name-server IP]
+  serve      (Linux, as root) the Bluetooth service the apps talk to
+  code       (Linux, as root) the setup code for the label
   adapters
   version";
 
-/// One device as the summary table shows it.
-#[derive(Default, Clone)]
-struct Row {
-    name: String,
-    mac: String,
-    vendor: String,
-    ports: Vec<u16>,
-    ms: Option<f64>,
-    model: String,
+/// One device as the summary table (and the Bluetooth results) show it.
+#[derive(Default, Clone, serde::Serialize)]
+pub struct Row {
+    pub ip: String,
+    pub name: String,
+    pub mac: String,
+    pub vendor: String,
+    pub ports: Vec<u16>,
+    pub ms: Option<f64>,
+    pub model: String,
 }
 
 fn main() {
@@ -59,6 +68,21 @@ fn main() {
                 println!("{:<16} {:<18} {:<18} {}", a.id.split('|').next().unwrap_or(""), a.address, a.mac, a.suggested_range);
             }
         }
+        #[cfg(target_os = "linux")]
+        Some("serve") => {
+            if let Err(e) = ble::serve() {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        Some("code") => match ble::setup_code() {
+            Ok(c) => println!("{c}"),
+            Err(e) => {
+                eprintln!("Couldn\u{2019}t read or save the setup code: {e} (run with sudo)");
+                std::process::exit(1);
+            }
+        },
         Some("version") | Some("--version") => println!("arpradar-sensor {}", env!("CARGO_PKG_VERSION")),
         _ => {
             eprintln!("{HELP}");
@@ -144,7 +168,7 @@ fn collect(rows: &Mutex<BTreeMap<u32, Row>>, e: scan::ScanEvent) {
     let mut rows = rows.lock().unwrap();
     let mut each = |ip: &str, f: &mut dyn FnMut(&mut Row)| {
         if let Some(k) = range::ip(ip) {
-            f(rows.entry(k).or_default());
+            f(rows.entry(k).or_insert_with(|| Row { ip: ip.to_string(), ..Default::default() }));
         }
     };
     let model = |r: &mut Row, t: &str| {
@@ -190,4 +214,21 @@ fn collect(rows: &Mutex<BTreeMap<u32, Row>>, e: scan::ScanEvent) {
         }
         _ => {}
     }
+}
+
+/// This box's own network (the first non-loopback adapter's suggested range).
+pub fn default_range() -> Option<String> {
+    sys::adapters().into_iter().find(|a| !a.address.starts_with("127.")).map(|a| a.suggested_range)
+}
+
+/// Runs a scan and returns one row per device; `progress` gets the engine's progress text as it goes.
+pub fn scan_rows(targets: Vec<u32>, opts: scan::Options, cancel: Arc<AtomicBool>, progress: impl Fn(f64, &str) + Sync) -> Vec<Row> {
+    let rows: Mutex<BTreeMap<u32, Row>> = Mutex::new(BTreeMap::new());
+    scan::run(targets, opts, cancel, |e| {
+        if let scan::ScanEvent::Progress { fraction, text } = &e {
+            progress(*fraction, text);
+        }
+        collect(&rows, e);
+    });
+    rows.into_inner().unwrap().into_values().collect()
 }

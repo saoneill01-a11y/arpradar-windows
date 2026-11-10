@@ -1,0 +1,17 @@
+# ARPradar sensor: the Bluetooth service the apps talk to. Install:
+#   sudo install -m 755 arpradar-sensor /usr/local/bin/
+#   sudo install -m 644 arpradar-sensor.service /etc/systemd/system/
+#   sudo systemctl enable --now arpradar-sensor
+# The setup code for the label: sudo arpradar-sensor code
+[Unit]
+Description=ARPradar sensor (Bluetooth)
+After=bluetooth.target NetworkManager.service
+Wants=bluetooth.target
+
+[Service]
+ExecStart=/usr/local/bin/arpradar-sensor serve
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
