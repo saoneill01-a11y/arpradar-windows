@@ -16,6 +16,8 @@ fn udp() -> Option<UdpSocket> {
 }
 
 /// Sends `packet(i, ip)` to every target (and any extra address), then collects replies until `timeout`.
+/// Targets that haven't answered after 0.6 s are asked once more: one UDP question and one answer are easily lost on
+/// busy Wi-Fi (and on a Raspberry Pi, whose Wi-Fi shares its radio with Bluetooth).
 fn ask_all(
     targets: &[u32],
     port: u16,
@@ -27,28 +29,53 @@ fn ask_all(
 ) {
     let Some(sock) = udp() else { return };
     prepare(&sock);
-    for (i, &t) in targets.iter().enumerate() {
-        if cancel.load(Ordering::Relaxed) {
-            return;
+    let send_to = |only: &dyn Fn(u32) -> bool| {
+        for (i, &t) in targets.iter().enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            if !only(t) {
+                continue;
+            }
+            send(&sock, i, t);
+            if i % 32 == 31 {
+                std::thread::sleep(Duration::from_millis(3));
+            }
         }
-        send(&sock, i, t);
-        if i % 32 == 31 {
-            std::thread::sleep(Duration::from_millis(3));
-        }
-    }
+    };
+    send_to(&|_| true);
     let _ = port;
-    let deadline = Instant::now() + timeout;
+    let started = Instant::now();
+    let deadline = started + timeout;
+    let again_at = started + Duration::from_millis(600);
+    let mut asked_again = timeout <= Duration::from_millis(900);
+    let mut answered: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut buf = vec![0u8; 9000];
     while !cancel.load(Ordering::Relaxed) {
-        let left = deadline.saturating_duration_since(Instant::now());
+        let now = Instant::now();
+        if !asked_again && now >= again_at {
+            asked_again = true;
+            send_to(&|t| !answered.contains(&t));
+            continue;
+        }
+        let left = deadline.saturating_duration_since(now);
         if left.is_zero() {
             break;
         }
-        let _ = sock.set_read_timeout(Some(left.max(Duration::from_millis(5))));
+        let wait = if asked_again { left } else { left.min(again_at.saturating_duration_since(now)) };
+        let _ = sock.set_read_timeout(Some(wait.max(Duration::from_millis(5))));
         match sock.recv_from(&mut buf) {
-            Ok((n, std::net::SocketAddr::V4(from))) => on_reply(u32::from(*from.ip()), &buf[..n]),
+            Ok((n, std::net::SocketAddr::V4(from))) => {
+                let ip = u32::from(*from.ip());
+                answered.insert(ip);
+                on_reply(ip, &buf[..n]);
+            }
             Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => break,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                if asked_again {
+                    break;
+                }
+            }
             // Windows reports "connection reset" when a target sent back ICMP port unreachable: keep listening.
             Err(_) => {}
         }

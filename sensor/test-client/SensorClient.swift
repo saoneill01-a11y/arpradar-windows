@@ -157,10 +157,10 @@ final class Client: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         case "devices":
             let list = ev["devices"] as? [[String: Any]] ?? []
             say("Results: \(list.count) devices in \(ev["seconds"] ?? "?") s (\(size) bytes over Bluetooth)")
-            for d in list.prefix(8) {
+            for d in list {
                 print(String(format: "%-15@ %-17@ %-24@ %@", d["ip"] as? String ?? "", d["mac"] as? String ?? "", String((d["vendor"] as? String ?? "").prefix(24)), d["name"] as? String ?? ""))
             }
-            if list.count > 8 { print("… and \(list.count - 8) more") }
+            
         case "done": say("Done"); quit(0)
         case "error": say("Sensor error: \(ev["text"] ?? "")"); quit(1)
         case "claimed": say("Claimed: this client is the owner now"); p_readInfoAgain()

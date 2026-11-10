@@ -301,7 +301,17 @@ fn handle(cmd: Command, s: &mut State, shared: &Arc<Mutex<State>>, tx: mpsc::Sen
 
 /// The one-step scan: join the given Wi-Fi (if any), scan, report, then leave that Wi-Fi and delete it.
 fn run_scan(r: Option<String>, quiet: bool, community: Option<String>, ssid: Option<String>, password: Option<String>, cancel: Arc<AtomicBool>, tx: &mpsc::Sender<serde_json::Value>) {
-    let progress = |f: f64, t: &str| send(tx, json!({"type": "progress", "fraction": f, "text": t}));
+    // At most one progress message a second: the Pi's Wi-Fi shares its radio with Bluetooth, and less Bluetooth
+    // traffic during a scan means fewer lost Wi-Fi replies.
+    let last = Mutex::new(None::<std::time::Instant>);
+    let progress = |f: f64, t: &str| {
+        let mut l = last.lock().unwrap();
+        if l.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1)) {
+            return;
+        }
+        *l = Some(std::time::Instant::now());
+        send(tx, json!({"type": "progress", "fraction": f, "text": t}));
+    };
     let joined = ssid.as_deref().filter(|s| !s.trim().is_empty()).map(|s| s.to_string());
     if let Some(ssid) = &joined {
         progress(0.0, &format!("Joining {ssid}\u{2026}"));
