@@ -1,6 +1,6 @@
 name: Build
 
-# Builds only when app code changes (the repo is private: Windows minutes count double).
+# Builds only when app code changes.
 on:
   push:
     branches: [main]

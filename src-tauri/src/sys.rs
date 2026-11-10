@@ -1,7 +1,8 @@
 //! The parts that differ per system: ping, MAC addresses, the computer's name.
 //! Windows uses its built-in IP Helper functions (no admin rights needed).
-//! Linux (step 6) and macOS (used only to try the app on Sean's Mac while building it) use the
-//! `ping` and `arp` commands for now.
+//! Linux (the desktop version and the Pi sensor) pings with an unprivileged ICMP socket and reads /proc/net/arp,
+//! falling back to the `ping` command when the system doesn't allow ICMP sockets. macOS (used only to try the app on
+//! Sean's Mac while building it) uses the `ping` and `arp` commands.
 
 #[cfg(not(windows))]
 use std::collections::HashMap;
@@ -44,8 +45,67 @@ pub fn ping(ip: u32, timeout_ms: u32) -> Option<f64> {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: an unprivileged ICMP "ping socket" (allowed by net.ipv4.ping_group_range, which systemd opens to every
+/// user); the `ping` command when that's refused.
+#[cfg(target_os = "linux")]
 pub fn ping(ip: u32, timeout_ms: u32) -> Option<f64> {
+    match icmp_socket_ping(ip, timeout_ms) {
+        Ok(r) => r,
+        Err(_) => ping_command(ip, timeout_ms),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn icmp_socket_ping(ip: u32, timeout_ms: u32) -> std::io::Result<Option<f64>> {
+    use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+    use std::mem::MaybeUninit;
+    use std::time::{Duration, Instant};
+    let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::ICMPV4))?;
+    let to = SockAddr::from(std::net::SocketAddrV4::new(std::net::Ipv4Addr::from(ip), 0));
+    let seq = (ip as u16) ^ 0x5241;
+    // Echo request; the kernel fills in the identifier for a ping socket.
+    let mut pkt = [8u8, 0, 0, 0, 0, 0, (seq >> 8) as u8, seq as u8, b'A', b'R', b'P', b'r', b'a', b'd', b'a', b'r'];
+    let sum = icmp_checksum(&pkt);
+    pkt[2] = (sum >> 8) as u8;
+    pkt[3] = sum as u8;
+    let start = Instant::now();
+    s.send_to(&pkt, &to)?;
+    let deadline = Duration::from_millis(timeout_ms as u64);
+    let mut buf = [MaybeUninit::<u8>::uninit(); 256];
+    loop {
+        let left = deadline.checked_sub(start.elapsed()).filter(|d| !d.is_zero());
+        let Some(left) = left else { return Ok(None) };
+        s.set_read_timeout(Some(left))?;
+        let (n, from) = match s.recv_from(&mut buf) {
+            Ok(r) => r,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let got: Vec<u8> = buf[..n].iter().map(|b| unsafe { b.assume_init() }).collect();
+        let from_ip = from.as_socket_ipv4().map(|a| u32::from(*a.ip()));
+        // A ping socket gets the ICMP part only (no IP header): type 0 = echo reply.
+        if n >= 8 && got[0] == 0 && from_ip == Some(ip) && u16::from_be_bytes([got[6], got[7]]) == seq {
+            return Ok(Some(start.elapsed().as_secs_f64() * 1000.0));
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn icmp_checksum(b: &[u8]) -> u16 {
+    let mut sum: u32 = b.chunks(2).map(|c| u32::from(u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)]))).sum();
+    while sum > 0xFFFF {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
+pub fn ping(ip: u32, timeout_ms: u32) -> Option<f64> {
+    ping_command(ip, timeout_ms)
+}
+
+#[cfg(not(windows))]
+fn ping_command(ip: u32, timeout_ms: u32) -> Option<f64> {
     let wait = if cfg!(target_os = "macos") { timeout_ms.to_string() } else { (timeout_ms / 1000).max(1).to_string() };
     let out = std::process::Command::new("ping")
         .args(["-c", "1", "-W", &wait, &crate::range::text(ip)])
@@ -73,8 +133,32 @@ pub fn arp(ip: u32) -> Option<String> {
     Some(format_mac(&mac[..6]))
 }
 
-/// The ARP table, already filled in by the ping sweep (the Mac and Linux way).
+/// Linux: the kernel's ARP table, already filled in by the ping sweep (no `arp` command needed).
+#[cfg(target_os = "linux")]
+pub fn arp_table() -> HashMap<u32, String> {
+    parse_proc_arp(&std::fs::read_to_string("/proc/net/arp").unwrap_or_default())
+}
+
+/// "IP address  HW type  Flags  HW address  Mask  Device" rows; flag 0x2 = a complete entry.
 #[cfg(not(windows))]
+pub fn parse_proc_arp(text: &str) -> HashMap<u32, String> {
+    let mut out = HashMap::new();
+    for line in text.lines().skip(1) {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 4 || u32::from_str_radix(f[2].trim_start_matches("0x"), 16).unwrap_or(0) & 2 == 0 {
+            continue;
+        }
+        let Some(ip) = crate::range::ip(f[0]) else { continue };
+        let bytes: Vec<u8> = f[3].split(':').filter_map(|p| u8::from_str_radix(p, 16).ok()).collect();
+        if bytes.len() == 6 && bytes.iter().any(|&x| x != 0) && bytes[0] != 0xff {
+            out.insert(ip, format_mac(&bytes));
+        }
+    }
+    out
+}
+
+/// macOS: the ARP table, already filled in by the ping sweep.
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn arp_table() -> HashMap<u32, String> {
     let mut out = HashMap::new();
     if let Ok(o) = std::process::Command::new("arp").arg("-an").output() {
@@ -191,6 +275,19 @@ mod tests {
         assert_eq!(super::suggested_range(ip("192.168.1.23"), 24), "192.168.1.1-254");
         assert_eq!(super::suggested_range(ip("10.1.2.3"), 8), "10.1.2.1-254");
         assert_eq!(super::suggested_range(ip("10.1.2.3"), 23), "10.1.2.1-10.1.3.254");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn proc_arp() {
+        let text = "IP address       HW type     Flags       HW address            Mask     Device\n\
+                    10.20.30.1       0x1         0x2         02:00:00:00:00:01     *        wlan0\n\
+                    10.20.30.7       0x1         0x0         00:00:00:00:00:00     *        wlan0\n\
+                    10.20.30.9       0x1         0x2         aa:00:00:00:00:09     *        eth0\n";
+        let t = super::parse_proc_arp(text);
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[&crate::range::ip("10.20.30.1").unwrap()], "02:00:00:00:00:01");
+        assert_eq!(t[&crate::range::ip("10.20.30.9").unwrap()], "AA:00:00:00:00:09");
     }
 }
 

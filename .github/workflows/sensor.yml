@@ -1,0 +1,43 @@
+name: Pi sensor
+
+# The Raspberry Pi sensor (sensor/): ARPradar's scan engine with no window. Built on an ARM Linux machine with an
+# older system library (glibc 2.35) so it runs on Raspberry Pi OS Bookworm and newer (64-bit).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sensor/**"
+      - "src-tauri/src/**"
+      - "src-tauri/resources/oui.csv"
+      - ".github/workflows/sensor.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: sensor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pi:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sensor
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      # The shared engine's own tests, built for Linux (includes reading /proc/net/arp).
+      - run: cargo test --release --manifest-path sensor/Cargo.toml
+      - run: cargo build --release --manifest-path sensor/Cargo.toml
+      # A real (tiny) scan on the build machine: its own address, through the Linux ping socket and ARP table code.
+      - run: |
+          sensor/target/release/arpradar-sensor version
+          sensor/target/release/arpradar-sensor adapters
+          sensor/target/release/arpradar-sensor scan 127.0.0.1
+          file sensor/target/release/arpradar-sensor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arpradar-sensor-linux-arm64
+          path: sensor/target/release/arpradar-sensor
+          retention-days: 30
