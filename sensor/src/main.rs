@@ -49,6 +49,7 @@ const HELP: &str = "arpradar-sensor (ARPradar, GNU GPL v3)
 
 /// One device as the summary table (and the Bluetooth results) show it.
 #[derive(Default, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Row {
     pub ip: String,
     pub name: String,
@@ -56,7 +57,14 @@ pub struct Row {
     pub vendor: String,
     pub ports: Vec<u16>,
     pub ms: Option<f64>,
+    /// The first useful model text (for the terminal table).
     pub model: String,
+    /// The same details the apps keep separately.
+    pub web: String,
+    pub upnp: String,
+    pub snmp: String,
+    pub snmp_name: String,
+    pub ubnt: String,
 }
 
 fn main() {
@@ -198,16 +206,16 @@ fn collect(rows: &Mutex<BTreeMap<u32, Row>>, e: scan::ScanEvent) {
             for (ip, n) in names { each(&ip, &mut |r| if r.name.is_empty() { r.name = n.clone(); }); }
         }
         E::Upnp { info } => {
-            for (ip, i) in info { each(&ip, &mut |r| model(r, &i.model)); }
+            for (ip, i) in info { each(&ip, &mut |r| { r.upnp = i.model.clone(); model(r, &i.model) }); }
         }
         E::Snmp { info } => {
-            for (ip, i) in info { each(&ip, &mut |r| model(r, &i.descr)); }
+            for (ip, i) in info { each(&ip, &mut |r| { r.snmp = i.descr.clone(); r.snmp_name = i.name.clone(); model(r, &i.descr) }); }
         }
         E::Ubiquiti { info } => {
-            for (ip, i) in info { each(&ip, &mut |r| model(r, &i.model)); }
+            for (ip, i) in info { each(&ip, &mut |r| { r.ubnt = i.model.clone(); model(r, &i.model) }); }
         }
         E::WebTitles { titles } => {
-            for (ip, t) in titles { each(&ip, &mut |r| model(r, &t)); }
+            for (ip, t) in titles { each(&ip, &mut |r| { r.web = t.clone(); model(r, &t) }); }
         }
         _ => {}
     }
