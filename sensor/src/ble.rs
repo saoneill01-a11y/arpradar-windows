@@ -59,7 +59,17 @@ pub fn serve() -> Result<(), String> {
 async fn run(code: String) -> bluer::Result<()> {
     let session = bluer::Session::new().await?;
     let adapter = session.default_adapter().await?;
-    adapter.set_powered(true).await?;
+    // Right after rfkill unblock, BlueZ can answer "Busy" for a moment while the chip powers up.
+    for attempt in 1..=10 {
+        match adapter.set_powered(true).await {
+            Ok(()) => break,
+            Err(e) if attempt < 10 => {
+                eprintln!("Bluetooth not ready ({e}); trying again");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
     adapter.set_alias("ARPradar Sensor".into()).await.ok();
     let _adv = adapter
         .advertise(Advertisement {
