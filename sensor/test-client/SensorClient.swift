@@ -1,8 +1,9 @@
 // A small Mac test client for the ARPradar sensor's Bluetooth protocol (sensor/src/link.rs), and the first draft of
 // the Mac app's own sensor code. Build and run:
 //   swiftc -O sensor/test-client/SensorClient.swift -o /tmp/sensorclient
-//   /tmp/sensorclient CODE status | scan [--quiet] [RANGE] | wifi SSID PASSWORD | forget
-// The setup code is on the sensor's label (or: sudo arpradar-sensor code on the Pi).
+//   sensorclient OWNERFILE status | networks | scan [--quiet] [RANGE] [--wifi SSID PASSWORD] | release
+// OWNERFILE keeps the owner secret (the real app uses the Keychain). If the sensor has no owner, this client claims
+// it and saves the secret there; if it's owned by someone else, commands are refused.
 
 import CoreBluetooth
 import CryptoKit
@@ -17,13 +18,17 @@ enum SensorUUID {
 
 /// The same crypto and framing as link.rs.
 enum SensorCrypto {
-    static func normalize(_ code: String) -> String {
-        String(code.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) && $0.isASCII }).uppercased()
+    static func hmac(_ key: Data, _ parts: Data...) -> Data {
+        var m = HMAC<SHA256>(key: SymmetricKey(data: key)); for p in parts { m.update(data: p) }
+        return Data(m.finalize())
     }
-    static func key(code: String, nonce: Data) -> SymmetricKey {
-        var msg = Data("arpradar-sensor-v1".utf8); msg.append(nonce)
-        let mac = HMAC<SHA256>.authenticationCode(for: msg, using: SymmetricKey(data: Data(normalize(code).utf8)))
-        return SymmetricKey(data: Data(mac))
+    /// The owner secret from a claim: X25519 with the sensor's public key, then HMAC.
+    static func ownerSecret(mine: Curve25519.KeyAgreement.PrivateKey, sensorPublic: Data) throws -> Data {
+        let shared = try mine.sharedSecretFromKeyAgreement(with: .init(rawRepresentation: sensorPublic))
+        return hmac(shared.withUnsafeBytes { Data($0) }, Data("arpradar-owner-v1".utf8))
+    }
+    static func key(owner: Data, nonce: Data) -> SymmetricKey {
+        SymmetricKey(data: hmac(owner, Data("arpradar-sensor-v1".utf8), nonce))
     }
     static func seal(_ plain: Data, key: SymmetricKey) throws -> Data {
         try AES.GCM.seal(plain, using: key).combined!   // iv(12) ‖ ciphertext ‖ tag(16)
@@ -38,6 +43,7 @@ enum SensorCrypto {
         while i < s.endIndex { let j = s.index(i, offsetBy: 2); guard let b = UInt8(s[i..<j], radix: 16) else { return nil }; d.append(b); i = j }
         return d
     }
+    static func hex(_ d: Data) -> String { d.map { String(format: "%02x", $0) }.joined() }
 }
 
 /// Puts notification frames back together ([flags][bytes]; bit 0 first, bit 1 last).
@@ -54,7 +60,9 @@ struct Reassembler {
 }
 
 final class Client: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    let code: String, command: [String: Any]
+    let ownerFile: String, command: [String: Any]
+    var owner: Data?
+    var claimed = false
     var central: CBCentralManager!
     var peripheral: CBPeripheral?
     var chars: [CBUUID: CBCharacteristic] = [:]
@@ -62,8 +70,9 @@ final class Client: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var frames = Reassembler()
     var started = Date()
 
-    init(code: String, command: [String: Any]) {
-        self.code = code; self.command = command
+    init(ownerFile: String, command: [String: Any]) {
+        self.ownerFile = ownerFile; self.command = command
+        owner = (try? String(contentsOfFile: ownerFile, encoding: .utf8)).flatMap { SensorCrypto.unhex($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
     }
@@ -106,8 +115,22 @@ final class Client: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if c.uuid == SensorUUID.info {
             guard let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let nonce = (info["nonce"] as? String).flatMap(SensorCrypto.unhex), nonce.count == 16 else { say("Bad INFO"); quit(1) }
-            say("Sensor \(info["name"] ?? "?") \(info["version"] ?? "?"), busy: \(info["busy"] ?? "?")")
-            let k = SensorCrypto.key(code: code, nonce: nonce)
+            let owned = info["owned"] as? Bool ?? true
+            say("Sensor \(info["name"] ?? "?") \(info["version"] ?? "?") id \(info["id"] ?? "?"), owned: \(owned), busy: \(info["busy"] ?? "?")")
+            if !owned, let pubHex = info["claimPub"] as? String, let sensorPub = SensorCrypto.unhex(pubHex), !claimed {
+                // No owner: claim it.
+                let mine = Curve25519.KeyAgreement.PrivateKey()
+                let secret = try! SensorCrypto.ownerSecret(mine: mine, sensorPublic: sensorPub)
+                owner = secret; claimed = true
+                key = SensorCrypto.key(owner: secret, nonce: nonce)
+                try? SensorCrypto.hex(secret).write(toFile: ownerFile, atomically: true, encoding: .utf8)
+                say("No owner: claiming it (secret saved)")
+                var bytes = Data([0xC1]); bytes.append(mine.publicKey.rawRepresentation)
+                p.writeValue(bytes, for: chars[SensorUUID.command]!, type: .withResponse)
+                return
+            }
+            guard let owner else { say("This sensor has an owner and this client isn’t it."); quit(2) }
+            let k = SensorCrypto.key(owner: owner, nonce: nonce)
             key = k
             let body = try! JSONSerialization.data(withJSONObject: command)
             var bytes = nonce; bytes.append(try! SensorCrypto.seal(body, key: k))
@@ -121,9 +144,12 @@ final class Client: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         }
     }
     func peripheral(_ p: CBPeripheral, didWriteValueFor c: CBCharacteristic, error: Error?) {
-        if let error { say("Command refused: \(error.localizedDescription) (wrong setup code?)"); quit(2) }
-        say("Command accepted")
+        if let error { say("Refused: \(error.localizedDescription) (not the owner?)"); quit(2) }
+        say("Accepted")
     }
+
+    /// After claiming, read INFO again for a fresh nonce and send the real command.
+    func p_readInfoAgain() { if let p = peripheral, let c = chars[SensorUUID.info] { p.readValue(for: c) } }
 
     func show(_ ev: [String: Any], size: Int) {
         switch ev["type"] as? String {
@@ -137,21 +163,25 @@ final class Client: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             if list.count > 8 { print("… and \(list.count - 8) more") }
         case "done": say("Done"); quit(0)
         case "error": say("Sensor error: \(ev["text"] ?? "")"); quit(1)
+        case "claimed": say("Claimed: this client is the owner now"); p_readInfoAgain()
         default:
             say("\(ev)")
-            if ["status", "wifi", "forgot"].contains(ev["type"] as? String ?? "") { quit(0) }
+            if ["status", "networks", "released"].contains(ev["type"] as? String ?? "") { quit(0) }
         }
     }
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
 guard args.count >= 2 else {
-    FileHandle.standardError.write(Data("usage: sensorclient CODE status | scan [--quiet] [RANGE] | wifi SSID PASSWORD | forget\n".utf8)); exit(2)
+    FileHandle.standardError.write(Data("usage: sensorclient OWNERFILE status | networks | scan [--quiet] [RANGE] [--wifi SSID PASSWORD] | release\n".utf8)); exit(2)
 }
-let code = args.removeFirst(), verb = args.removeFirst()
+let ownerFile = args.removeFirst(), verb = args.removeFirst()
 var cmd: [String: Any] = ["cmd": verb]
-if verb == "scan" { cmd["quiet"] = args.contains("--quiet"); if let r = args.first(where: { !$0.hasPrefix("--") }) { cmd["range"] = r } }
-if verb == "wifi" { guard args.count == 2 else { exit(2) }; cmd["ssid"] = args[0]; cmd["password"] = args[1] }
-let client = Client(code: code, command: cmd)
-DispatchQueue.main.asyncAfter(deadline: .now() + 120) { client.say("Timed out"); client.quit(1) }
+if verb == "scan" {
+    cmd["quiet"] = args.contains("--quiet")
+    if let i = args.firstIndex(of: "--wifi"), args.count > i + 2 { cmd["ssid"] = args[i + 1]; cmd["password"] = args[i + 2]; args.removeSubrange(i...(i + 2)) }
+    if let r = args.first(where: { !$0.hasPrefix("--") }) { cmd["range"] = r }
+}
+let client = Client(ownerFile: ownerFile, command: cmd)
+DispatchQueue.main.asyncAfter(deadline: .now() + 150) { client.say("Timed out"); client.quit(1) }
 RunLoop.main.run()

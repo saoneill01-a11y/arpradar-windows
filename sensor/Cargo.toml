@@ -1,6 +1,6 @@
 [package]
 name = "arpradar-sensor"
-version = "0.2.0"
+version = "0.3.0"
 description = "ARPradar's scan engine without a window, for the Raspberry Pi sensor and other Linux boxes"
 authors = ["Sean O'Neill"]
 license = "GPL-3.0-or-later"
@@ -21,6 +21,7 @@ open = "5"
 aes-gcm = "0.10"
 hmac = "0.12"
 getrandom = "0.2"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 socket2 = { version = "0.5", features = ["all"] }

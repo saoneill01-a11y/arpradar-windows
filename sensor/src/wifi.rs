@@ -1,8 +1,11 @@
-//! Joining and forgetting Wi-Fi networks with NetworkManager (`nmcli`), for the Bluetooth setup. Networks the sensor
-//! is given over Bluetooth are saved as "arpradar-…" connections, so Forget only removes those.
+//! Wi-Fi for the one-step scan, with NetworkManager (`nmcli`): a network given over Bluetooth is joined as the
+//! connection "arpradar-scan" (never auto-joined), used for one scan, then deleted, so no client password stays on
+//! the sensor. NetworkManager then goes back to the sensor's own Wi-Fi by itself.
 
+use serde::Serialize;
 use std::process::Command;
 
+const SCAN_CONNECTION: &str = "arpradar-scan";
 const PREFIX: &str = "arpradar-";
 
 fn nmcli(args: &[&str]) -> Result<String, String> {
@@ -11,26 +14,32 @@ fn nmcli(args: &[&str]) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().replace("Error: ", "");
-        Err(if err.is_empty() { "Couldn\u{2019}t join that network.".into() } else { err })
+        Err(if err.is_empty() { "couldn\u{2019}t join that network".into() } else { err })
     }
 }
 
-/// Joins `ssid` (WPA/WPA2/WPA3 personal, or open when the password is blank). Up to about 30 s.
-pub fn join(ssid: &str, password: &str) -> Result<(), String> {
-    if ssid.trim().is_empty() || ssid.len() > 32 {
-        return Err("That isn\u{2019}t a Wi-Fi network name.".into());
+/// Joins `ssid` for one scan (WPA/WPA2/WPA3 personal, or open when the password is blank). Up to about 30 s.
+pub fn join_for_scan(ssid: &str, password: &str) -> Result<(), String> {
+    if ssid.len() > 32 {
+        return Err("that isn\u{2019}t a Wi-Fi network name".into());
     }
-    let name = format!("{PREFIX}{ssid}");
-    let _ = nmcli(&["connection", "delete", &name]);
+    leave_scan_network();
     let _ = nmcli(&["device", "wifi", "rescan", "ifname", "wlan0"]);
-    let mut args = vec!["--wait", "30", "device", "wifi", "connect", ssid, "ifname", "wlan0", "name", &name];
+    let mut args = vec!["--wait", "30", "device", "wifi", "connect", ssid, "ifname", "wlan0", "name", SCAN_CONNECTION];
     if !password.is_empty() {
         args.extend(["password", password]);
     }
-    nmcli(&args).map(|_| ())
+    nmcli(&args)?;
+    let _ = nmcli(&["connection", "modify", SCAN_CONNECTION, "connection.autoconnect", "no"]);
+    Ok(())
 }
 
-/// Deletes every network given over Bluetooth. Returns how many.
+/// Leaves the scan's network and deletes it (and its password).
+pub fn leave_scan_network() {
+    let _ = nmcli(&["connection", "delete", SCAN_CONNECTION]);
+}
+
+/// Deletes every arpradar-… connection (left over if the power was pulled mid-scan). Returns how many.
 pub fn forget() -> usize {
     let list = nmcli(&["-t", "-f", "NAME", "connection", "show"]).unwrap_or_default();
     list.lines().filter(|n| n.starts_with(PREFIX)).filter(|n| nmcli(&["connection", "delete", n]).is_ok()).count()
@@ -49,4 +58,38 @@ pub fn current() -> (String, String) {
         .find_map(|l| l.split_once(':').map(|(_, v)| v.split('/').next().unwrap_or("").to_string()))
         .unwrap_or_default();
     (ssid, ip)
+}
+
+/// wlan0's own range (after joining a network for a scan).
+pub fn wlan_range() -> Option<String> {
+    crate::sys::adapters().into_iter().find(|a| a.id.starts_with("wlan0|")).map(|a| a.suggested_range)
+}
+
+#[derive(Serialize)]
+pub struct Network {
+    pub ssid: String,
+    pub signal: u8,
+    pub secure: bool,
+}
+
+/// Wi-Fi networks in range, strongest first, one entry per name.
+pub fn nearby() -> Vec<Network> {
+    let text = nmcli(&["-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"]).unwrap_or_default();
+    let mut out: Vec<Network> = Vec::new();
+    for line in text.lines() {
+        // Fields are ':'-separated with '\:' inside names; SECURITY and SIGNAL never contain ':'.
+        let mut parts = line.rsplitn(3, ':');
+        let (Some(sec), Some(sig), Some(ssid)) = (parts.next(), parts.next(), parts.next()) else { continue };
+        let ssid = ssid.replace("\\:", ":");
+        if ssid.is_empty() {
+            continue;
+        }
+        let signal = sig.parse().unwrap_or(0);
+        match out.iter_mut().find(|n| n.ssid == ssid) {
+            Some(n) => n.signal = n.signal.max(signal),
+            None => out.push(Network { ssid, signal, secure: !sec.is_empty() && sec != "--" }),
+        }
+    }
+    out.sort_by(|a, b| b.signal.cmp(&a.signal));
+    out
 }

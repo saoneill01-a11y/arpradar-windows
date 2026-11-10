@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex};
 const HELP: &str = "arpradar-sensor (ARPradar, GNU GPL v3)
   scan [RANGE] [--quiet] [--json] [--community NAME] [--name-server IP]
   serve      (Linux, as root) the Bluetooth service the apps talk to
-  code       (Linux, as root) the setup code for the label
+  release    (Linux, as root) forget the owner app
   adapters
   version";
 
@@ -76,13 +76,10 @@ fn main() {
             }
         }
         #[cfg(target_os = "linux")]
-        Some("code") => match ble::setup_code() {
-            Ok(c) => println!("{c}"),
-            Err(e) => {
-                eprintln!("Couldn\u{2019}t read or save the setup code: {e} (run with sudo)");
-                std::process::exit(1);
-            }
-        },
+        Some("release") => {
+            ble::clear_owner();
+            println!("No owner now: the next app to connect becomes the owner (restart the service: sudo systemctl restart arpradar-sensor).");
+        }
         Some("version") | Some("--version") => println!("arpradar-sensor {}", env!("CARGO_PKG_VERSION")),
         _ => {
             eprintln!("{HELP}");

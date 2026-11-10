@@ -2,7 +2,7 @@
 #   sudo install -m 755 arpradar-sensor /usr/local/bin/
 #   sudo install -m 644 arpradar-sensor.service /etc/systemd/system/
 #   sudo systemctl enable --now arpradar-sensor
-# The setup code for the label: sudo arpradar-sensor code
+# Forget the owner app: sudo arpradar-sensor release (or put an empty file named "reset" on the SD card)
 [Unit]
 Description=ARPradar sensor (Bluetooth)
 After=bluetooth.target NetworkManager.service
