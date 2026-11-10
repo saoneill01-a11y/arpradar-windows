@@ -229,11 +229,31 @@ pub fn default_range() -> Option<String> {
 /// Runs a scan and returns one row per device; `progress` gets the engine's progress text as it goes.
 pub fn scan_rows(targets: Vec<u32>, opts: scan::Options, cancel: Arc<AtomicBool>, progress: impl Fn(f64, &str) + Sync) -> Vec<Row> {
     let rows: Mutex<BTreeMap<u32, Row>> = Mutex::new(BTreeMap::new());
-    scan::run(targets, opts, cancel, |e| {
+    scan::run(targets, opts, cancel.clone(), |e| {
         if let scan::ScanEvent::Progress { fraction, text } = &e {
             progress(*fraction, text);
         }
         collect(&rows, e);
     });
-    rows.into_inner().unwrap().into_values().collect()
+    let mut rows = rows.into_inner().unwrap();
+    // A second round of names, once the network is quiet, for devices still without one. On a Raspberry Pi the
+    // Wi-Fi shares its radio with Bluetooth, and during a full scan the small NetBIOS and Bonjour replies get lost.
+    let nameless: Vec<u32> = rows.iter().filter(|(_, r)| r.name.is_empty()).map(|(ip, _)| *ip).collect();
+    if !nameless.is_empty() && !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        progress(0.97, "Looking up the remaining names\u{2026}");
+        let (nb, bj) = std::thread::scope(|s| {
+            let nb = s.spawn(|| names::netbios(&nameless, std::time::Duration::from_millis(1500), &cancel));
+            let bj = s.spawn(|| names::bonjour(&nameless, std::time::Duration::from_millis(2000), &cancel));
+            (nb.join().unwrap_or_default(), bj.join().unwrap_or_default())
+        });
+        for (ip, n) in nb.into_iter().chain(bj) {
+            if let Some(r) = rows.get_mut(&ip) {
+                let n = identify::clean_text(&n, 64);
+                if r.name.is_empty() && !n.is_empty() {
+                    r.name = n;
+                }
+            }
+        }
+    }
+    rows.into_values().collect()
 }
