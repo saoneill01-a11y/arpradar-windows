@@ -16,6 +16,13 @@ const csvText = (header, rows) => [header, ...rows].map(r => r.map(csvCell).join
 /// One cell of tab-separated text for the clipboard: tabs and line breaks inside it become spaces.
 const tsvCell = v => String(v ?? "").replace(/[\t\r\n]+/g, " ");
 
+/// An organization's entry for a Wi-Fi heatmap: by its link, else (saved before heatmaps were linked) by its title.
+/// Index in `list`, or -1. Saving the heatmap again updates that entry instead of adding another.
+function heatmapEntry(heatmap, title, org, list) {
+  const i = list.findIndex(x => x.orgID === org && x.kind === "heatmap" && x.heatmapID === heatmap);
+  return i >= 0 ? i : list.findIndex(x => x.orgID === org && x.kind === "heatmap" && !x.heatmapID && x.title === title);
+}
+
 const Orgs = (() => {
   const T = () => window.__TAURI__;
   const me = Math.random().toString(36).slice(2);
@@ -93,7 +100,14 @@ const Orgs = (() => {
 
   function addItem(orgID, draft, extra = {}) {
     return mutate(d => {
-      d.items.push({ id: id(), orgID, kind: draft.kind, date: new Date().toISOString(), title: draft.title, summary: draft.summary,
+      // A heatmap saved here before is updated in place (measured some more, renamed), not added twice.
+      const i = draft.heatmapID ? heatmapEntry(draft.heatmapID, draft.title, orgID, d.items) : -1;
+      if (i >= 0) {
+        Object.assign(d.items[i], { title: draft.title, summary: draft.summary, table: draft.table, date: new Date().toISOString(), heatmapID: draft.heatmapID });
+        if (extra.note) d.items[i].note = extra.note;
+        return;
+      }
+      d.items.push({ ...(draft.heatmapID ? { heatmapID: draft.heatmapID } : {}), id: id(), orgID, kind: draft.kind, date: new Date().toISOString(), title: draft.title, summary: draft.summary,
                      note: extra.note || "", siteName: extra.siteName || "", surveyID: extra.surveyID || null, table: draft.table });
     });
   }
@@ -117,6 +131,7 @@ const KINDS = {
   traceroute: { title: "Traceroute", group: "other" }, ping: { title: "Ping", group: "other" },
   speedTest: { title: "Speed test", group: "other" }, wifi: { title: "Wi-Fi survey", group: "other" },
   wifiSignal: { title: "Wi-Fi signal", group: "other" }, connection: { title: "Connection info", group: "other" },
+  heatmap: { title: "Wi-Fi heatmap", group: "heatmaps" },
 };
 const n1 = v => v == null || Number.isNaN(v) ? "" : v.toFixed(1);
 const isChainRow = r => /^\s*↳/.test(r[0] || "");
@@ -291,6 +306,7 @@ function saveToOrgButton(holder, makeDraft, opts = {}) {
       const save = async () => {
         back.remove();
         await Orgs.addItem(org.id, draft, { note: input.value.trim(), siteName: opts.siteName?.() || localStorage.getItem("currentSiteName") || "" });
+        opts.onSaved?.(org.id);
         btn.textContent = "Saved ✓";
         setTimeout(() => (btn.textContent = "Save to Organization ▾"), 2000);
       };

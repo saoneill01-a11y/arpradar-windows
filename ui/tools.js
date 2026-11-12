@@ -1278,7 +1278,7 @@ async function portsTool(root, arg) {
   if (d.autoStart) start();
 }
 
-const TOOLS = { ports: portsTool, help: helpTool, orgs: orgsTool, settings: settingsTool, remotewake: remoteWakeTool, ping: pingTool, trace: traceTool, dns: dnsTool, wifi: wifiTool, analyzer: analyzerTool, connection: connectionTool, speed: speedTool, subnet: subnetTool };
+const TOOLS = { heatmap: heatmapTool, ports: portsTool, help: helpTool, orgs: orgsTool, settings: settingsTool, remotewake: remoteWakeTool, ping: pingTool, trace: traceTool, dns: dnsTool, wifi: wifiTool, analyzer: analyzerTool, connection: connectionTool, speed: speedTool, subnet: subnetTool };
 document.body.classList.toggle("basic", !advanced());
 window.addEventListener("storage", e => { if (e.key === "mode") document.body.classList.toggle("basic", !advanced()); });
 (async () => {

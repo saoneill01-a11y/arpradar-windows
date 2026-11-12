@@ -943,7 +943,8 @@ function menuItems(name) {
       { label: "Dark", checked: look === "dark", run: () => setLook("dark") },
     ];
   }
-  if (name === "tools") return TOOL_LIST.filter(t => advanced() || !t.advanced).map(t => ({ label: t.label, key: `Ctrl+${t.n}`, run: () => openTool(t.tool) }));
+  if (name === "tools") return [...TOOL_LIST.filter(t => advanced() || !t.advanced).map(t => ({ label: t.label, key: `Ctrl+${t.n}`, run: () => openTool(t.tool) })),
+    { sep: true }, { label: "Wi-Fi Heatmap…", key: "Ctrl+Alt+4", run: () => openTool("heatmap") }];
   if (name === "help") return [{ label: "ARPradar Help", key: "F1", run: () => openTool("help") }, { sep: true }, { label: "Check for Updates…", run: updateDialog }, { label: "License", run: licenseDialog }, { label: "About ARPradar", run: aboutDialog }];
   return [];
 }
@@ -1995,6 +1996,7 @@ document.addEventListener("keydown", e => {
   const k = e.key.toLowerCase();
   const act = (e.ctrlKey && k === "enter") ? toggleScan
     : (e.ctrlKey && e.altKey && k === "s") ? scanListDialog
+    : (e.ctrlKey && e.altKey && k === "4") ? () => openTool("heatmap")
     : (e.ctrlKey && e.altKey && k === "b") ? () => setMode(advanced() ? "basic" : "advanced")
     : (e.ctrlKey && e.shiftKey && k === "e") ? () => exportRows("xlsx")
     : (e.ctrlKey && !e.shiftKey && !e.altKey && k === "e") ? () => exportRows("csv")

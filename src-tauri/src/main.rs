@@ -11,6 +11,7 @@ mod netinfo;
 mod oui;
 mod portscan;
 mod range;
+mod heatmap;
 mod scan;
 mod snmpwalk;
 mod sys;
@@ -126,6 +127,44 @@ async fn unifi_get(address: String, path: String, id: Option<String>, key: Optio
     };
     tauri::async_runtime::spawn_blocking(move || unifi::get(&address, &path, &key, fingerprint.as_deref())).await.map_err(|e| e.to_string())?
 }
+// MARK: Wi-Fi Heatmap files
+
+fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn heatmap_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    Ok(heatmap::list(&app_dir(&app)?))
+}
+#[tauri::command]
+async fn heatmap_save(app: tauri::AppHandle, id: String, json: String) -> Result<(), String> {
+    let dir = app_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || heatmap::save(&dir, &id, &json)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn heatmap_delete(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let dir = app_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || heatmap::delete(&dir, &id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn heatmap_read_file(app: tauri::AppHandle, id: String, name: String) -> Result<Option<String>, String> {
+    let dir = app_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || heatmap::read_file(&dir, &id, &name)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn heatmap_write_file(app: tauri::AppHandle, id: String, name: String, data: String) -> Result<(), String> {
+    let dir = app_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || heatmap::write_file(&dir, &id, &name, &data)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn heatmap_copy_file(app: tauri::AppHandle, id: String, from: String, to: String) -> Result<(), String> {
+    heatmap::copy_file(&app_dir(&app)?, &id, &from, &to)
+}
+#[tauri::command]
+fn heatmap_duplicate(app: tauri::AppHandle, from: String, to: String) -> Result<(), String> {
+    heatmap::duplicate(&app_dir(&app)?, &from, &to)
+}
+
 /// A scan device that answered SNMP, to read as a possible managed switch for the map.
 #[derive(serde::Deserialize)]
 struct SnmpCandidate {
@@ -286,6 +325,7 @@ const TOOLS: &[(&str, &str, f64, f64)] = &[
     ("orgs", "Organizations", 1000.0, 640.0),
     ("help", "ARPradar Help", 900.0, 620.0),
     ("ports", "Scan Ports", 760.0, 580.0),
+    ("heatmap", "Wi-Fi Heatmap", 1240.0, 820.0),
 ];
 
 /// Opens a tool's window (or brings it forward), optionally filled in with `arg` (an IP from the device list).
@@ -834,6 +874,13 @@ fn main() {
             find_subdomains,
             unifi_get,
             snmp_switches,
+            heatmap_list,
+            heatmap_save,
+            heatmap_delete,
+            heatmap_read_file,
+            heatmap_write_file,
+            heatmap_copy_file,
+            heatmap_duplicate,
             unifi_key_save,
             unifi_key_has,
             unifi_key_delete,

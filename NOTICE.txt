@@ -26,6 +26,8 @@ Your data
 
 Third-party parts
    ARPradar includes the IEEE's public list of network vendor codes (OUI).
+   Wi-Fi Heatmap reads PDF floor plans with Mozilla's PDF.js (Apache License 2.0;
+   ui/vendor/pdfjs/LICENSE).
    It is built with Tauri and other open source Rust and JavaScript parts, each under
    its own license (mostly MIT or Apache-2.0).
 

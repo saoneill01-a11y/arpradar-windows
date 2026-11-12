@@ -23,6 +23,8 @@ native-tls = "0.2"
 open = "5"
 x509-parser = "0.16"
 sha2 = "0.10"
+base64 = "0.22"
+trash = "5"
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

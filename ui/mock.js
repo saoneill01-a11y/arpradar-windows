@@ -6,6 +6,14 @@ if (!window.__TAURI__) {
   const emitTo = (name, payload) => (listeners[name] || []).forEach(f => f({ payload }));
   const emit = payload => emitTo("scan", payload);
   const ip = n => `10.20.30.${n}`;
+  // Heatmap pictures: in localStorage when they fit (so a reload keeps them), else only in memory.
+  const heatMem = new Map();
+  const heatFiles = {
+    get: k => heatMem.get(k) ?? (() => { try { return localStorage.getItem("demo-heatfile-" + k); } catch { return null; } })(),
+    set: (k, v) => { heatMem.set(k, v); try { localStorage.setItem("demo-heatfile-" + k, v); } catch {} },
+    delete: k => { heatMem.delete(k); try { localStorage.removeItem("demo-heatfile-" + k); } catch {} },
+    keys: () => [...new Set([...heatMem.keys(), ...Object.keys(localStorage).filter(x => x.startsWith("demo-heatfile-")).map(x => x.slice(14))])],
+  };
   const demo = [
     { n: 1, mac: "00:1A:2B:00:00:01", vendor: "Example Networks", ports: [53, 80, 443], ms: 1.2, names: { DNS: "gateway" } },
     { n: 10, mac: "00:1A:2B:00:00:0A", vendor: "Sample Storage Inc.", ports: [22, 80, 445], ms: 0.8, names: { NetBIOS: "NAS-01", Bonjour: "nas-01" } },
@@ -136,13 +144,22 @@ if (!window.__TAURI__) {
           case "connection_info": return { adapter: "Wi-Fi", description: "Example Wireless Adapter", address: "10.20.30.5", prefix: 24, mask: "255.255.255.0", router: "10.20.30.1", dhcpServer: "10.20.30.1", dhcp: true, leaseLeftSecs: 70000, dns: ["10.20.30.1"], domain: "example.lan", ipv6: ["2001:db8::5", "fe80::1"], mac: "00:1A:2B:00:00:05", mtu: 1500, linkMbps: 866 };
           case "public_ip": return "203.0.113.77";
           case "renew_dhcp": return;
+          // Wi-Fi Heatmap files, kept in this browser's localStorage.
+          case "heatmap_list": return Object.keys(localStorage).filter(k => k.startsWith("demo-heatmap-json-")).map(k => localStorage.getItem(k));
+          case "heatmap_save": localStorage.setItem("demo-heatmap-json-" + args.id, args.json); return;
+          case "heatmap_delete": Object.keys(localStorage).filter(k => k.includes(args.id)).forEach(k => localStorage.removeItem(k)); return;
+          case "heatmap_read_file": return heatFiles.get(args.id + "/" + args.name) ?? null;
+          case "heatmap_write_file": if (args.data) heatFiles.set(args.id + "/" + args.name, args.data); else heatFiles.delete(args.id + "/" + args.name); return;
+          case "heatmap_copy_file": heatFiles.set(args.id + "/" + args.to, heatFiles.get(args.id + "/" + args.from)); return;
+          case "heatmap_duplicate": for (const k of heatFiles.keys()) if (k.startsWith(args.from + "/")) heatFiles.set(args.to + k.slice(args.from.length), heatFiles.get(k)); return;
           case "wifi_status": return { state: "ok", ssid: "Example-Office", bssid: "00:1A:2B:AA:00:01", rssi: -55 - Math.round(Math.random() * 8), quality: 82, rxMbps: 866, txMbps: 780, channel: 44, band: "5 GHz", widthMhz: 80, security: "WPA2/WPA3 Personal", adapter: "Example Wireless Adapter" };
-          case "wifi_scan": return [
+          case "wifi_scan": { const j = Math.round(Math.random() * 22); return [
             { ssid: "Example-Office", bssid: "00:1A:2B:AA:00:01", rssi: -55, channel: 44, band: "5 GHz", widthMhz: 80, security: "WPA2/WPA3 Personal", mine: true },
             { ssid: "Example-Office", bssid: "00:1A:2B:AA:00:02", rssi: -48, channel: 6, band: "2.4 GHz", widthMhz: 20, security: "WPA2/WPA3 Personal", mine: false },
             { ssid: "Neighbor-Net", bssid: "00:1A:2B:BB:00:01", rssi: -72, channel: 1, band: "2.4 GHz", widthMhz: 20, security: "WPA2 Personal", mine: false },
             { ssid: "", bssid: "00:1A:2B:CC:00:01", rssi: -81, channel: 11, band: "2.4 GHz", widthMhz: 40, security: "WPA2 Personal", mine: false },
-            { ssid: "Guest", bssid: "00:1A:2B:AA:00:03", rssi: -66, channel: 149, band: "5 GHz", widthMhz: 80, security: "Open", mine: false }];
+            { ssid: "Guest", bssid: "00:1A:2B:AA:00:03", rssi: -66, channel: 149, band: "5 GHz", widthMhz: 80, security: "Open", mine: false }]
+            .map(n => ({ ...n, rssi: n.rssi - (n.ssid === "Example-Office" ? j : 0) })); }
           case "open_location_settings": return;
           case "speed_start": {
             const e = p => emitTo(args.event || "speed", p);

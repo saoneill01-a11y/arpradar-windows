@@ -73,3 +73,89 @@ body.tool { overflow: auto; }
 .dnsg td.ttl { color: var(--muted); }
 .dnsg tr.child td { color: var(--muted); }
 .typetag { display: inline-block; margin-right: 6px; padding: 0 4px; border: 1px solid var(--edge); border-radius: 3px; font-size: 10px; font-family: inherit; color: var(--muted); }
+
+/* Wi-Fi Heatmap (heatmapview.js) */
+body.heatwin .toolpage { padding: 0; gap: 0; height: 100vh; min-height: 0; }
+.hm-top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.hm-top > button, .hm-top .btn { height: 30px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 5px; background: var(--input); }
+.hm-top > button.primary { background: var(--green); color: var(--on-green); border-color: var(--green); font-weight: 600; }
+.hm-top > button:disabled { opacity: .5; }
+.hm-top .hm-picker { font-weight: 600; }
+.hm-top .grow { flex: 1; }
+.hm-body { flex: 1; display: flex; min-height: 0; }
+.hm-main { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 16px; min-width: 0; position: relative; }
+.hm-note { padding: 9px 12px; border-radius: 8px; background: color-mix(in srgb, var(--green) 12%, transparent); }
+.hm-note.warn { background: color-mix(in srgb, var(--map-orange, #f5a524) 16%, transparent); }
+.hm-scroll { flex: 1; overflow: auto; border: 1px solid var(--edge); border-radius: 8px; background: var(--bg); position: relative; }
+.hm-stage { position: relative; min-width: 100%; min-height: 100%; cursor: crosshair; user-select: none; }
+.hm-plan, .hm-grid, .hm-heat { position: absolute; pointer-events: none; }
+.hm-plan.multiply { mix-blend-mode: multiply; }
+.hm-heat { image-rendering: auto; }
+.hm-grid { background-image: linear-gradient(color-mix(in srgb, var(--muted) 18%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--muted) 18%, transparent) 1px, transparent 1px); display: flex; align-items: center; justify-content: center; }
+.hm-grid span { background: var(--panel); color: var(--muted); padding: 8px; border-radius: 6px; }
+.hm-svg { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.hm-path { fill: none; stroke: color-mix(in srgb, var(--green) 55%, transparent); stroke-width: 2; stroke-dasharray: 6 6; }
+.hm-clash { stroke: #e0443a; stroke-width: 3; stroke-dasharray: 8 5; }
+.hm-scale { stroke: var(--green); stroke-width: 3; } .hm-scaledot { fill: var(--green); }
+.hm-clashlabel { position: absolute; transform: translate(-50%, -50%); background: #e0443a; color: #fff; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 9px; white-space: nowrap; pointer-events: none; }
+.hm-spot { position: absolute; width: 24px; height: 24px; margin: -12px 0 0 -12px; cursor: pointer; }
+.hm-spot::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--fill); border: 2px solid #fff; }
+.hm-spot.walk { cursor: grab; }
+.hm-spot.map::after { inset: 6px; box-shadow: 0 0 2px rgba(0,0,0,.5); }
+.hm-spot.sel::after { inset: 5px; border: 3px solid var(--green); }
+.hm-ap { position: absolute; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: var(--panel); border: 1.5px dashed color-mix(in srgb, var(--text) 60%, transparent); opacity: .6; cursor: grab; display: flex; align-items: center; justify-content: center; }
+.hm-ap.placed { border-style: solid; border-color: color-mix(in srgb, var(--text) 90%, transparent); opacity: 1; }
+.hm-ap.on { opacity: 1; z-index: 2; }
+.hm-ap.sel { background: var(--green); }
+.hm-ap svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.hm-ap svg circle { fill: currentColor; stroke: none; }
+.hm-ap .q { position: absolute; right: -7px; top: -7px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); color: #fff; font-size: 9px; line-height: 12px; text-align: center; }
+.hm-ap.clash::before { content: ""; position: absolute; inset: -6px; border: 3px solid #e0443a; border-radius: 50%; }
+.hm-chtag { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); background: #1a8c40; color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; white-space: nowrap; }
+.hm-chtag.bad { background: #e0443a; }
+.hm-apname { position: absolute; top: 28px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid color-mix(in srgb, var(--text) 40%, transparent); padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.hm-weak { position: absolute; transform: translate(-50%, -50%); background: var(--panel); color: #a3241c; border: 1.2px solid #c72e26; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; white-space: nowrap; pointer-events: none; }
+.hm-measuring { position: absolute; transform: translateX(-50%); background: var(--panel); padding: 10px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
+.hm-measuring progress { width: 160px; }
+.hm-busydot { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--green); border: 3px solid #fff; pointer-events: none; }
+.hm-card { position: absolute; left: 26px; top: 26px; max-height: 440px; overflow: auto; width: 340px; background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,.3); padding: 14px; z-index: 5; }
+.hm-card[hidden] { display: none; }
+.hm-card h3 { margin: 0 24px 4px 0; font-size: 15px; } .hm-card p { margin: 4px 0; } .hm-card hr { border: 0; border-top: 1px solid var(--line); }
+.hm-close { position: absolute; right: 8px; top: 6px; background: none; border: 0; color: var(--muted); font-size: 15px; cursor: pointer; }
+.hm-mini { width: 100%; border-collapse: collapse; font-size: 13px; } .hm-mini td { padding: 2px 4px; }
+.hm-mini .num, .hm-list .num { text-align: right; font-variant-numeric: tabular-nums; }
+.hm-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hm-cap { font-size: 11px; font-weight: 600; color: var(--muted); }
+.hm-legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.hm-gradwrap { display: flex; flex-direction: column; gap: 2px; width: 260px; }
+.hm-grad { height: 9px; border-radius: 5px; } .hm-gradlabels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.hm-key { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; } .hm-key i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.hm-legend .grow { flex: 1; } .hm-legend input[type=range] { width: 130px; } .hm-pct { width: 40px; text-align: right; }
+.hm-icon { width: 24px; height: 24px; border: 0; background: none; color: var(--text); font-size: 16px; } .hm-icon:disabled { opacity: .35; }
+.toolpage .btn.small { height: 24px; padding: 0 8px; font-size: 12px; }
+.hm-side { width: 310px; flex: none; overflow: auto; padding: 16px; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+.hm-side[hidden] { display: none; }
+.hm-side p { margin: 0; } .hm-side .field select { width: 100%; height: 28px; }
+.hm-sec { font-size: 11px; font-weight: 600; letter-spacing: .6px; color: var(--muted); margin-top: 10px; }
+.hm-head { display: flex; justify-content: space-between; align-items: baseline; }
+.hm-list { border: 1px solid var(--edge); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.hm-lh, .hm-lr { display: grid; grid-template-columns: 1fr 62px 40px; gap: 6px; padding: 4px 8px; font-size: 12px; }
+.hm-lh { color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); } .hm-lr span:last-child { text-align: right; font-weight: 600; }
+.hm-lr span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .hm-lr.other { color: var(--muted); } .hm-lr.other span:last-child { font-weight: 400; }
+.hm-aprow { display: flex; width: 100%; justify-content: space-between; align-items: center; text-align: left; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); cursor: pointer; }
+.hm-aprow:hover { background: var(--hover); } .hm-aprow.sel { background: var(--select); }
+.hm-aprow > span { display: flex; flex-direction: column; } .hm-aprow .note { font-size: 11px; }
+.hm-tip { background: color-mix(in srgb, var(--muted) 10%, transparent); border-radius: 8px; padding: 10px; color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.hm-slider { display: flex; align-items: center; gap: 8px; } .hm-slider input { flex: 1; }
+.hm-cov { display: flex; height: 9px; border-radius: 5px; overflow: hidden; } .hm-cov i { display: block; }
+.hm-stats { display: flex; gap: 8px; } .hm-stats div { flex: 1; display: flex; flex-direction: column; } .hm-stats b { font-size: 17px; }
+.hm-finding { font-size: 13px; } .hm-finding.bad { color: var(--red); } .hm-finding.warn { color: #f0a020; } .hm-finding.good { color: var(--online); }
+.hm-clashrow { font-size: 12px; } .hm-clashrow::first-letter { color: #e0443a; }
+.hm-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; cursor: default; }
+.hm-empty p { max-width: 460px; color: var(--muted); } .hm-emptyicon { font-size: 40px; color: var(--muted); }
+.hm-composer { width: min(1040px, 94vw); max-width: none; height: min(780px, 92vh); display: flex; flex-direction: column; gap: 10px; }
+.hm-cview { flex: 1; overflow: auto; background: rgba(0,0,0,.85); border-radius: 8px; position: relative; min-height: 200px; }
+.hm-cstage { position: relative; } .hm-cstage img, .hm-cwhite { position: absolute; user-select: none; }
+.hm-cwhite { background: #fff; } #cplan { outline: 1px dashed var(--green); cursor: move; touch-action: none; }
+.hm-cgrid { display: grid; grid-template-columns: 50px 1fr 230px; gap: 6px 10px; align-items: center; }
+.hm-composer .buttons .left { margin-right: auto; }
