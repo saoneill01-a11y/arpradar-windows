@@ -12,6 +12,7 @@ mod oui;
 mod portscan;
 mod range;
 mod heatmap;
+mod sensorlink;
 mod scan;
 mod snmpwalk;
 mod sys;
@@ -127,6 +128,31 @@ async fn unifi_get(address: String, path: String, id: Option<String>, key: Optio
     };
     tauri::async_runtime::spawn_blocking(move || unifi::get(&address, &path, &key, fingerprint.as_deref())).await.map_err(|e| e.to_string())?
 }
+// MARK: Tools › ARPradar Sensor (Bluetooth LE)
+
+#[tauri::command]
+async fn sensor_start(app: tauri::AppHandle, state: tauri::State<'_, sensorlink::SensorState>) -> Result<(), String> {
+    sensorlink::start(app, &state).await
+}
+#[tauri::command]
+async fn sensor_select(app: tauri::AppHandle, state: tauri::State<'_, sensorlink::SensorState>, id: String) -> Result<(), String> {
+    sensorlink::select(app, &state, id).await
+}
+#[tauri::command]
+async fn sensor_send(app: tauri::AppHandle, state: tauri::State<'_, sensorlink::SensorState>, cmd: serde_json::Value) -> Result<(), String> {
+    sensorlink::send(app, &state, cmd).await
+}
+#[tauri::command]
+async fn sensor_disconnect(state: tauri::State<'_, sensorlink::SensorState>) -> Result<(), String> {
+    sensorlink::disconnect(&state).await;
+    Ok(())
+}
+#[tauri::command]
+async fn sensor_forget(app: tauri::AppHandle, state: tauri::State<'_, sensorlink::SensorState>) -> Result<(), String> {
+    sensorlink::forget_owner(app, &state).await;
+    Ok(())
+}
+
 // MARK: Wi-Fi Heatmap files
 
 fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -326,6 +352,7 @@ const TOOLS: &[(&str, &str, f64, f64)] = &[
     ("help", "ARPradar Help", 900.0, 620.0),
     ("ports", "Scan Ports", 760.0, 580.0),
     ("heatmap", "Wi-Fi Heatmap", 1240.0, 820.0),
+    ("sensor", "ARPradar Sensor", 760.0, 500.0),
 ];
 
 /// Opens a tool's window (or brings it forward), optionally filled in with `arg` (an IP from the device list).
@@ -819,6 +846,7 @@ fn main() {
         .manage(DownloadedUpdate::default())
         .manage(PortScans::default())
         .manage(Jobs::default())
+        .manage(sensorlink::SensorState::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
             list_adapters,
@@ -874,6 +902,11 @@ fn main() {
             find_subdomains,
             unifi_get,
             snmp_switches,
+            sensor_start,
+            sensor_select,
+            sensor_send,
+            sensor_disconnect,
+            sensor_forget,
             heatmap_list,
             heatmap_save,
             heatmap_delete,

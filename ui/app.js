@@ -218,6 +218,29 @@ async function startScan() {
   } catch (e) { showError(String(e)); }
   render();
 }
+/// Results from an ARPradar Sensor (Tools › ARPradar Sensor) shown as a new scan: the same steps as a local scan
+/// (vendors, types, NEW, History, offer to save). rows: [{ip, mac, name, vendor, ports, ms, web, upnp, snmp, snmpName, ubnt}].
+async function showSensorScan({ rows = [], range = "", seconds = 0, label = "Sensor", cancelled = false }) {
+  if (ui.scanning) return;
+  newScan();
+  $("range").value = range; ui.rangeText = range;
+  try { ui.spans = await invoke("parse_range", { text: range }); } catch { ui.spans = rows.map(r => [ipNum(r.ip), ipNum(r.ip)]); }
+  ui.tab = "results"; ui.scanSiteId = null;
+  scanStarted = Date.now() - seconds * 1000;
+  setScanning(true);
+  const by = f => Object.fromEntries(rows.filter(f[0]).map(r => [r.ip, f[1](r)]));
+  onScanEvent({ kind: "found", devices: rows.map(r => ({ ip: r.ip })) });
+  onScanEvent({ kind: "macs", macs: by([r => r.mac, r => ({ mac: r.mac, vendor: r.vendor || "" })]) });
+  onScanEvent({ kind: "ports", ports: by([() => true, r => r.ports || []]) });
+  onScanEvent({ kind: "response", ms: by([r => r.ms != null, r => r.ms]) });
+  onScanEvent({ kind: "webTitles", titles: by([r => r.web, r => r.web]) });
+  onScanEvent({ kind: "upnp", info: by([r => r.upnp, r => ({ model: r.upnp })]) });
+  onScanEvent({ kind: "snmp", info: by([r => r.snmp || r.snmpName, r => ({ name: r.snmpName || "", descr: r.snmp || "", location: "" })]) });
+  onScanEvent({ kind: "ubiquiti", info: by([r => r.ubnt, r => ({ model: r.ubnt, firmware: "" })]) });
+  onScanEvent({ kind: "names", source: "Sensor", names: by([r => r.name, r => r.name]) });
+  finishScan(cancelled);
+  setProgress(null, `${label} · ${rows.length} devices in ${seconds.toFixed(1)} s`);
+}
 function stopScan() { invoke("stop_scan"); setProgress(null, "Stopping…"); }
 function toggleScan() { ui.scanning ? stopScan() : startScan(); }
 
@@ -944,7 +967,8 @@ function menuItems(name) {
     ];
   }
   if (name === "tools") return [...TOOL_LIST.filter(t => advanced() || !t.advanced).map(t => ({ label: t.label, key: `Ctrl+${t.n}`, run: () => openTool(t.tool) })),
-    { sep: true }, { label: "Wi-Fi Heatmap…", key: "Ctrl+Alt+4", run: () => openTool("heatmap") }];
+    { sep: true }, { label: "Wi-Fi Heatmap…", key: "Ctrl+Alt+4", run: () => openTool("heatmap") },
+    ...(advanced() ? [{ label: "ARPradar Sensor…", key: "Ctrl+9", run: () => openTool("sensor") }] : [])];
   if (name === "help") return [{ label: "ARPradar Help", key: "F1", run: () => openTool("help") }, { sep: true }, { label: "Check for Updates…", run: updateDialog }, { label: "License", run: licenseDialog }, { label: "About ARPradar", run: aboutDialog }];
   return [];
 }
@@ -1239,7 +1263,7 @@ function openTool(tool, arg) { invoke("open_tool", { tool, arg: arg ?? null }).c
 // MARK: Details panel, right-click menu, actions
 
 function setDetails(on) { ui.showDetails = on; save("showDetails", on ? "1" : "0"); renderDetails(); }
-const NAME_SOURCES = ["NetBIOS", "Bonjour", "DNS", "UPnP", "SNMP", "UniFi"];
+const NAME_SOURCES = ["NetBIOS", "Bonjour", "DNS", "UPnP", "SNMP", "UniFi", "Sensor"];
 const ipv6Kind = a => /^fe[89ab]/i.test(a) ? "Link" : /^f[cd]/i.test(a) ? "Local" : "Global";
 const selectedDevice = () => ui.selection.size === 1 ? shown.find(d => ui.selection.has(d.ip)) : null;
 
@@ -1997,6 +2021,7 @@ document.addEventListener("keydown", e => {
   const act = (e.ctrlKey && k === "enter") ? toggleScan
     : (e.ctrlKey && e.altKey && k === "s") ? scanListDialog
     : (e.ctrlKey && e.altKey && k === "4") ? () => openTool("heatmap")
+    : (e.ctrlKey && !e.altKey && k === "9") ? () => { if (advanced()) openTool("sensor"); }
     : (e.ctrlKey && e.altKey && k === "b") ? () => setMode(advanced() ? "basic" : "advanced")
     : (e.ctrlKey && e.shiftKey && k === "e") ? () => exportRows("xlsx")
     : (e.ctrlKey && !e.shiftKey && !e.altKey && k === "e") ? () => exportRows("csv")
@@ -2061,6 +2086,7 @@ let appVersion = "";
   await UniFiStore.load();
   wireMapView();
   await T.event.listen("tray-scan", () => toggleScan());
+  await T.event.listen("sensor-scan", e => showSensorScan(e.payload));
   await T.event.listen("org-action", e => {
     const { action, value } = e.payload;
     if (action === "new-org") surveySetupDialog(null);

@@ -74,6 +74,14 @@ body.tool { overflow: auto; }
 .dnsg tr.child td { color: var(--muted); }
 .typetag { display: inline-block; margin-right: 6px; padding: 0 4px; border: 1px solid var(--edge); border-radius: 3px; font-size: 10px; font-family: inherit; color: var(--muted); }
 
+/* ARPradar Sensor */
+.sensorwin { display: flex; flex: 1; min-height: 0; margin: -14px -16px; }
+.sensorlist { width: 210px; flex: none; border-right: 1px solid var(--line); background: var(--panel); overflow: auto; }
+.sensorrow { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: none; color: var(--text); }
+.sensorrow span:last-child { display: flex; flex-direction: column; } .sensorrow.on { background: var(--select); } .sensorrow:hover { background: var(--hover); }
+.sensordetail { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.sensordetail h2 { margin: 0; font-size: 16px; } .sensordetail .field { max-width: 420px; }
+
 /* Wi-Fi Heatmap (heatmapview.js) */
 body.heatwin .toolpage { padding: 0; gap: 0; height: 100vh; min-height: 0; }
 .hm-top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }

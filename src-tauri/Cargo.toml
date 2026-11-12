@@ -25,6 +25,15 @@ x509-parser = "0.16"
 sha2 = "0.10"
 base64 = "0.22"
 trash = "5"
+# Tools › ARPradar Sensor (Bluetooth LE) and the sensor protocol (sensor/src/link.rs, shared with the Pi).
+btleplug = "0.11"
+uuid = "1"
+futures = "0.3"
+tokio = { version = "1", features = ["time", "sync"] }
+aes-gcm = "0.10"
+hmac = "0.12"
+getrandom = "0.2"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

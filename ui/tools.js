@@ -1316,7 +1316,104 @@ async function portsTool(root, arg) {
   if (d.autoStart) start();
 }
 
-const TOOLS = { heatmap: heatmapTool, ports: portsTool, help: helpTool, orgs: orgsTool, settings: settingsTool, remotewake: remoteWakeTool, ping: pingTool, trace: traceTool, dns: dnsTool, wifi: wifiTool, analyzer: analyzerTool, connection: connectionTool, speed: speedTool, subnet: subnetTool };
+// MARK: ARPradar Sensor (a Raspberry Pi running arpradar-sensor, over Bluetooth LE; the link is sensorlink.rs)
+
+/// Tools › ARPradar Sensor: nearby sensors on the left; the chosen one's Wi-Fi and a one-step scan on the right.
+/// Results open in the main window as a new scan.
+async function sensorTool(root) {
+  document.title = "ARPradar Sensor";
+  const st = { nearby: new Map(), selected: null, phase: "idle", text: "", name: "", version: "", ssid: "", ip: "", networks: [], note: "",
+    working: null, form: { network: "", other: "", password: "", range: "", quiet: false } };
+  const OTHER = "\u0001other";
+  root.innerHTML = `<div class="sensorwin"><aside class="sensorlist"><div class="hm-sec" style="margin:10px 10px 4px">NEARBY</div><div id="snear"></div><p class="note" id="snearnote" style="padding:10px"></p></aside>
+    <section class="sensordetail" id="sdetail"></section></div>`;
+  const signal = r => r > -70 ? "Strong signal" : r > -85 ? "Good signal" : "Weak signal";
+  const drawNearby = () => {
+    $("snear").innerHTML = [...st.nearby.values()].map(s => `<button type="button" class="sensorrow${s.id === st.selected ? " on" : ""}" data-id="${esc(s.id)}">
+      <span class="${s.rssi > -70 ? "good" : s.rssi > -85 ? "fair" : "note"}">📡</span><span><b>${esc(s.name)}</b><small class="note">${signal(s.rssi)}</small></span></button>`).join("");
+    $("snearnote").textContent = st.nearby.size ? "Sensors show up when they’re powered on within Bluetooth range." : "Looking for sensors… Power one on within about 10 m of this PC.";
+  };
+  const message = (title, text) => `<h2>${esc(title)}</h2><p class="note">${esc(text)}</p>`;
+  const chosenSSID = () => !st.form.network ? null : st.form.network === OTHER ? st.form.other.trim() : st.form.network;
+  const chosenSecure = () => { const s = chosenSSID(); return s ? (st.networks.find(n => n.ssid === s)?.secure ?? true) : false; };
+  const draw = () => {
+    drawNearby();
+    const d = $("sdetail");
+    if (st.phase === "bluetoothOff") return (d.innerHTML = message("Bluetooth", st.text));
+    if (st.phase === "idle") return (d.innerHTML = message("ARPradar Sensor", "Pick a sensor on the left. The first time, this PC becomes its owner: other computers and phones can’t use it until you release it."));
+    if (st.phase === "connecting") return (d.innerHTML = '<p><span class="spinner"></span> Connecting…</p>');
+    if (st.phase === "failed") return (d.innerHTML = message("Sensor", st.text));
+    if (st.phase === "ownedByOther") return (d.innerHTML = message("This sensor belongs to another app", "Ask its owner to choose Release Sensor. Or reset it: put the SD card in a computer, add an empty file named “reset”, and put the card back. It then has no owner.")
+      + (st.note ? `<p class="note">${esc(st.note)}</p>` : ""));
+    const f = st.form, working = st.phase === "working";
+    d.innerHTML = `<h2>${esc(st.name || "ARPradar Sensor")}</h2><p class="note">${esc(st.ssid ? `On ${st.ssid} · ${st.ip} · sensor ${st.version}` : `Not on a Wi-Fi network · sensor ${st.version}`)}</p>
+      <div class="field"><label for="snet">Network</label><select id="snet">
+        <option value="">${esc(st.ssid ? `${st.ssid} (the network it’s on)` : "The network it’s on")}</option>
+        ${st.networks.filter(n => n.ssid !== st.ssid).map(n => `<option value="${esc(n.ssid)}" ${f.network === n.ssid ? "selected" : ""}>${esc(n.secure ? n.ssid : `${n.ssid} (open)`)}</option>`).join("")}
+        <option value="${OTHER}" ${f.network === OTHER ? "selected" : ""}>Other…</option></select></div>
+      ${f.network === OTHER ? `<div class="field"><label for="sother">Network name</label><input id="sother" value="${esc(f.other)}"></div>` : ""}
+      ${chosenSSID() && chosenSecure() ? '<div class="field"><label for="spass">Password</label><input id="spass" type="password" autocomplete="off"></div>' : ""}
+      <div class="field"><label for="srange">IP range</label><input id="srange" class="mono" placeholder="Its whole network" value="${esc(f.range)}" spellcheck="false"></div>
+      <div class="field"><span class="label">Scan</span><div class="segmented small" id="squiet" style="align-self:flex-start"><button type="button" data-q="0" class="${f.quiet ? "" : "on"}">Normal</button><button type="button" data-q="1" class="${f.quiet ? "on" : ""}">Quiet</button></div></div>
+      ${chosenSSID() ? '<p class="note">The sensor joins this network just for the scan, then leaves it and deletes the password.</p>' : ""}
+      <div class="bar"><button type="button" id="srelease" ${working ? "disabled" : ""}>Release Sensor…</button><button type="button" id="srefresh" ${working ? "disabled" : ""}>↻ Refresh Networks</button><span class="grow"></span>
+        ${working ? '<button type="button" class="stop" id="sstop">Stop</button>' : `<button type="button" class="primary" id="sgo" ${f.network === OTHER && !f.other.trim() ? "disabled" : ""}>Scan</button>`}</div>
+      ${working ? `<div><progress max="1" value="${Math.min(Math.max(st.working.fraction, 0), 1)}" style="width:100%"></progress><p class="note">${esc(st.working.text)}</p></div>` : ""}
+      ${st.note ? `<p class="note">${esc(st.note)}${st.note.includes("main window") ? ' <button type="button" class="linkbtn" id="sshow">Show</button>' : ""}</p>` : ""}`;
+    $("snet").onchange = e => { f.network = e.target.value; draw(); };
+    if ($("sother")) $("sother").oninput = e => { f.other = e.target.value; const b = $("sgo"); if (b) b.disabled = !f.other.trim(); };
+    $("srange").oninput = e => { f.range = e.target.value; };
+    $("squiet").onclick = e => { const b = e.target.closest("[data-q]"); if (b) { f.quiet = b.dataset.q === "1"; draw(); } };
+    $("srefresh").onclick = () => send({ cmd: "networks" });
+    $("srelease").onclick = () => confirmIt("Release this sensor?", "This PC stops being its owner. The next computer or phone that connects to it becomes the owner.", "Release Sensor", () => send({ cmd: "release" }));
+    if ($("sstop")) $("sstop").onclick = () => send({ cmd: "cancel" });
+    if ($("sshow")) $("sshow").onclick = () => invoke("org_action", { action: "show-main", value: "" }).catch(() => {});
+    if ($("sgo")) $("sgo").onclick = () => {
+      const ssid = chosenSSID(), cmd = { cmd: "scan", quiet: f.quiet };
+      if (ssid) { cmd.ssid = ssid; cmd.password = $("spass")?.value || ""; }
+      if (f.range.trim()) cmd.range = f.range.trim();
+      st.phase = "working"; st.working = { fraction: 0, text: ssid ? `Joining ${ssid}…` : "Starting…" }; st.note = "";
+      draw(); send(cmd);
+    };
+  };
+  const send = cmd => invoke("sensor_send", { cmd }).catch(e => { st.phase = "failed"; st.text = String(e); draw(); });
+  $("snear").onclick = e => {
+    const b = e.target.closest("[data-id]"); if (!b || b.dataset.id === st.selected) return;
+    st.selected = b.dataset.id; st.phase = "connecting"; st.note = ""; st.networks = []; st.ssid = st.ip = "";
+    draw();
+    invoke("sensor_select", { id: st.selected }).catch(e => { st.phase = "failed"; st.text = String(e); draw(); });
+  };
+  const gotEvent = ev => {
+    switch (ev.type) {
+      case "status": st.ssid = ev.ssid || ""; st.ip = ev.ip || ""; if (st.phase !== "working") st.phase = "ready"; break;
+      case "networks": st.networks = (ev.networks || []).filter(n => n.ssid).map(n => ({ ssid: n.ssid, signal: n.signal || 0, secure: n.secure ?? true })); break;
+      case "progress": st.phase = "working"; st.working = { fraction: ev.fraction || 0, text: ev.text || "" }; break;
+      case "devices": {
+        const rows = ev.devices || [], seconds = ev.seconds || 0;
+        const label = "Sensor" + (ev.ssid ? ` · ${ev.ssid}` : st.ssid ? ` · ${st.ssid}` : "");
+        T.event.emit("sensor-scan", { rows, range: ev.range || "", seconds, label, cancelled: !!ev.cancelled }).catch(() => {});
+        st.note = `${rows.length} devices in ${seconds.toFixed(1)} s · shown in the main window`;
+        break;
+      }
+      case "done": st.phase = "ready"; send({ cmd: "status" }); break;
+      case "error": st.phase = "ready"; st.note = ev.text || "The sensor reported a problem."; break;
+      case "released": invoke("sensor_forget").catch(() => {}); st.note = "Released: the next app to connect becomes its owner."; st.phase = "ownedByOther"; break;
+    }
+    draw();
+  };
+  T.event.listen("sensor", e => {
+    const m = e.payload;
+    if (m.kind === "nearby") { st.nearby.set(m.id, { id: m.id, name: m.name, rssi: m.rssi }); drawNearby(); }
+    else if (m.kind === "phase") { st.phase = m.phase; st.text = m.text || ""; if (m.phase === "failed" && /disconnected/.test(st.text)) st.selected = null; draw(); }
+    else if (m.kind === "info") { st.name = m.name; st.version = m.version; }
+    else if (m.kind === "event") gotEvent(m.ev);
+  });
+  window.addEventListener("beforeunload", () => { invoke("sensor_disconnect").catch(() => {}); });
+  draw();
+  invoke("sensor_start").catch(e => { st.phase = "bluetoothOff"; st.text = String(e); draw(); });
+}
+
+const TOOLS = { sensor: sensorTool, heatmap: heatmapTool, ports: portsTool, help: helpTool, orgs: orgsTool, settings: settingsTool, remotewake: remoteWakeTool, ping: pingTool, trace: traceTool, dns: dnsTool, wifi: wifiTool, analyzer: analyzerTool, connection: connectionTool, speed: speedTool, subnet: subnetTool };
 document.body.classList.toggle("basic", !advanced());
 window.addEventListener("storage", e => { if (e.key === "mode") document.body.classList.toggle("basic", !advanced()); });
 (async () => {

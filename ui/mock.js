@@ -144,6 +144,26 @@ if (!window.__TAURI__) {
           case "connection_info": return { adapter: "Wi-Fi", description: "Example Wireless Adapter", address: "10.20.30.5", prefix: 24, mask: "255.255.255.0", router: "10.20.30.1", dhcpServer: "10.20.30.1", dhcp: true, leaseLeftSecs: 70000, dns: ["10.20.30.1"], domain: "example.lan", ipv6: ["2001:db8::5", "fe80::1"], mac: "00:1A:2B:00:00:05", mtu: 1500, linkMbps: 866 };
           case "public_ip": return "203.0.113.77";
           case "renew_dhcp": return;
+          // ARPradar Sensor: one made-up sensor nearby, already ours.
+          case "sensor_start": setTimeout(() => emitTo("sensor", { kind: "nearby", id: "demo-sensor", name: "arpradar-sensor", rssi: -62 }), 300); return;
+          case "sensor_select":
+            setTimeout(() => { emitTo("sensor", { kind: "info", name: "arpradar-sensor", version: "1.2.0" });
+              emitTo("sensor", { kind: "event", ev: { type: "status", ssid: "Example-Office", ip: "10.20.30.207" } });
+              emitTo("sensor", { kind: "event", ev: { type: "networks", networks: [{ ssid: "Example-Office", signal: 70, secure: true }, { ssid: "Example-Guest", signal: 55, secure: false }, { ssid: "Clinic-Staff", signal: 40, secure: true }] } }); }, 600);
+            return;
+          case "sensor_send": {
+            const ev = e => emitTo("sensor", { kind: "event", ev: e });
+            if (args.cmd.cmd === "scan") {
+              [0.2, 0.6, 0.9].forEach((f, i) => setTimeout(() => ev({ type: "progress", fraction: f, text: ["Pinging 254 addresses…", "Reading MAC addresses…", "Looking up names…"][i] }), 300 * (i + 1)));
+              setTimeout(() => { ev({ type: "devices", range: args.cmd.range || "10.40.50.1-254", seconds: 18.4, ssid: args.cmd.ssid || null, devices: [
+                { ip: "10.40.50.1", mac: "02:00:5E:40:00:01", name: "clinic-gw", vendor: "Example Networks", ports: [80, 443], ms: 1.2, web: "Router login" },
+                { ip: "10.40.50.20", mac: "02:00:5E:40:00:20", name: "FRONT-PC", vendor: "Contoso PCs", ports: [445, 3389], ms: 2.4 },
+                { ip: "10.40.50.31", mac: "02:00:5E:40:00:31", name: "", vendor: "Demo Printers Ltd.", ports: [80, 9100], ms: 3.1, snmp: "Demo Printers LX-200", snmpName: "lobby-printer" }] }); ev({ type: "done" }); }, 1400);
+            } else if (args.cmd.cmd === "status") ev({ type: "status", ssid: "Example-Office", ip: "10.20.30.207" });
+            else if (args.cmd.cmd === "release") ev({ type: "released" });
+            return;
+          }
+          case "sensor_disconnect": case "sensor_forget": return;
           // Wi-Fi Heatmap files, kept in this browser's localStorage.
           case "heatmap_list": return Object.keys(localStorage).filter(k => k.startsWith("demo-heatmap-json-")).map(k => localStorage.getItem(k));
           case "heatmap_save": localStorage.setItem("demo-heatmap-json-" + args.id, args.json); return;
