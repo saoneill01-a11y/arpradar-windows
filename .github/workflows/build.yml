@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "src-tauri/**"
+      - "sensor/src/link.rs"
       - "ui/**"
       - "package.json"
       - "tests/**"
