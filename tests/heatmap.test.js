@@ -7,8 +7,8 @@ const fs = require("fs"), path = require("path"), vm = require("vm"), assert = r
 const ctx = { console, crypto: globalThis.crypto, document: { createElement: () => ({ getContext: () => ({ measureText: t => ({ width: String(t).length * 6 }) }) }) } };
 vm.createContext(ctx);
 for (const f of ["netmap.js", "heatmap.js", "orgs.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "ui", f), "utf8"), ctx, { filename: f });
-vm.runInContext("Object.assign(this, { Heatmap, NetMapBuilder, heatmapEntry })", ctx);
-const { Heatmap: H, heatmapEntry } = ctx;
+vm.runInContext("Object.assign(this, { Heatmap, NetMapBuilder, heatmapEntry, surveyRows, surveyResultCount, isExpiryCheck, KINDS })", ctx);
+const { Heatmap: H, heatmapEntry, surveyRows, surveyResultCount, isExpiryCheck, KINDS } = ctx;
 const plain = x => JSON.parse(JSON.stringify(x));
 const near = (a, b, d = 0.001, msg) => assert.ok(Math.abs(a - b) <= d, msg || `${a} is not within ${d} of ${b}`);
 
@@ -263,6 +263,19 @@ test("older heatmap files still load", () => {
   const s = H.normalize({ id: "X", name: "Old", spots: [], overlay: { cx: 10, cy: 20, width: 300, rotation: 5, opacity: 0.8, stripped: true } });
   assert.equal(s.overlay.width, 300); assert.equal(s.overlay.white, false); assert.equal(s.overlay.mapOpacity, 1);
   assert.deepEqual(plain(s.apOverrides), {}); assert.equal(s.planWidth, 1600);
+});
+
+test("organization tabs: surveys open to their results, DNS splits off expiry checks", () => {
+  const item = (id, kind, date, extra = {}) => ({ id, kind, date, title: kind, orgID: "O", ...extra });
+  const list = [item("s1", "survey", "2026-11-01T10:00:00Z", { surveyID: "A" }), item("r1", "networkScan", "2026-11-01T10:02:00Z", { surveyID: "A" }),
+    item("r2", "speedTest", "2026-11-01T10:01:00Z", { surveyID: "A" }), item("s2", "survey", "2026-11-05T10:00:00Z", { surveyID: "B" }),
+    item("x", "networkScan", "2026-11-06T10:00:00Z"), item("e", "dns", "2026-11-07T10:00:00Z", { title: "Domain and certificate expiry · example.com" })];
+  assert.deepEqual(plain(surveyRows(list, new Set()).map(r => r.item.id)), ["s2", "s1"]);                      // closed: surveys only, newest first
+  assert.deepEqual(plain(surveyRows(list, new Set(["s1"])).map(r => [r.item.id, r.indented])), [["s2", false], ["s1", false], ["r2", true], ["r1", true]]);
+  assert.equal(surveyResultCount(list[0], list), 2);
+  assert.equal(surveyResultCount(list[3], list), 0);
+  assert.ok(isExpiryCheck(list[5]) && !isExpiryCheck(list[4]));
+  assert.equal(KINDS.survey.group, "surveys"); assert.equal(KINDS.networkScan.group, "scans"); assert.equal(KINDS.heatmap.group, "heatmaps");
 });
 
 let failed = 0;

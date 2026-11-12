@@ -346,7 +346,9 @@ async function dnsTool(root, arg) {
   const mark = (k, state) => { const m = $(`m-${k}`); m.className = `mark ${state || ""}`; m.textContent = MARK[state] || ""; };
 
   // --- Look Up
-  $("dq").value = arg || "";
+  // "expiry:example.com" (an organization's New Expiry Check) opens on Expiry and checks it right away.
+  const expiryArg = a => /^expiry:/.test(a || "") ? a.slice(7) : null;
+  $("dq").value = expiryArg(arg) ?? (arg || "");
   $("df").checked = load("dnsFollowCNAMEs", "0") === "1";
   $("dsub").checked = load("dnsFindSubdomains", "0") === "1";
   const folded = new Set();
@@ -557,9 +559,13 @@ async function dnsTool(root, arg) {
     table: { header: ["IP", "Name"], rows: rev.filter(r => r.name).map(r => [r.ip, r.name]), widths: [16, 60] } } : null, { enabled: () => rev.length > 0 }));
 
   setInterval(() => { refreshD(); refreshers.forEach(f => f()); }, 1000);
-  showTab(arg ? "lookup" : tab);
-  if (arg) { $("dt").value = isIPv4(arg) ? "PTR" : "All"; lookUp(); }
-  return a => { showTab("lookup"); $("dq").value = a; $("dt").value = isIPv4(a) ? "PTR" : "All"; lookUp(); };
+  const openWith = a => {
+    const ex = expiryArg(a);
+    if (ex !== null) { showTab("expiry"); $("dq").value = ex; if (ex) runExpiry(); return; }
+    showTab("lookup"); $("dq").value = a; $("dt").value = isIPv4(a) ? "PTR" : "All"; lookUp();
+  };
+  if (arg) openWith(arg); else showTab(tab);
+  return openWith;
 }
 
 // MARK: Wi-Fi Signal
@@ -1010,7 +1016,9 @@ async function orgsTool(root, arg) {
   await loadUnifi();
   let selected = arg || localStorage.getItem("currentOrgId") || Orgs.list[0]?.id || null;
   if (!Orgs.org(selected)) selected = Orgs.list[0]?.id || null;
-  let filter = "everything", picked = new Set();
+  // The tab shown, the DNS tab's Lookups | Expiry switch, and the surveys opened on Site Surveys (they start closed).
+  let filter = "surveys", dnsPart = "lookups", picked = new Set(), expanded = new Set();
+  const TABS = [["surveys", "Site Surveys"], ["scans", "Network Scans"], ["dns", "DNS"], ["ports", "Ports"], ["heatmaps", "Wi-Fi Heatmaps"], ["other", "Other"]];
   const act = (action, value) => invoke("org_action", { action, value: value || "" });
   root.innerHTML = `<div class="scanlist" style="flex:1;min-height:0"><div class="scanlist-items" style="max-height:none;display:flex;flex-direction:column">
       <div style="padding:8px 10px 4px;color:var(--muted);font-size:11px;font-weight:600">ORGANIZATIONS</div><div id="olist" style="flex:1;overflow:auto"></div>
@@ -1028,8 +1036,12 @@ async function orgsTool(root, arg) {
     if (!o) { $("odetail").innerHTML = `<p class="status">${Orgs.list.length ? "Pick an organization on the left." : "No organizations yet."}</p><div><button type="button" class="btn primary" id="oadd2">New Organization…</button></div>`;
       $("oadd2").onclick = () => act("new-org"); return; }
     const all = Orgs.items(o.id);
-    const shown = Orgs.timeline(all).filter(r => filter === "everything" || KINDS[r.item.kind]?.group === filter);
-    const counts = { everything: all.length }; for (const i of all) counts[KINDS[i.kind]?.group] = (counts[KINDS[i.kind]?.group] || 0) + 1;
+    const shown = filter === "surveys" ? surveyRows(all, expanded)
+      : filter === "dns" ? all.filter(i => i.kind === "dns" && isExpiryCheck(i) === (dnsPart === "expiry")).map(item => ({ item, indented: false }))
+      : all.filter(i => KINDS[i.kind]?.group === filter).map(item => ({ item, indented: false }));
+    const counts = {}; for (const i of all) counts[KINDS[i.kind]?.group] = (counts[KINDS[i.kind]?.group] || 0) + 1;
+    const expiryCount = all.filter(isExpiryCheck).length, dnsCount = all.filter(i => i.kind === "dns").length;
+    const tabLabel = TABS.find(t => t[0] === filter)[1];
     const fmtD = iso => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
     $("odetail").innerHTML = `
       <div class="field"><label for="on">Name</label><input id="on" value="${esc(o.name)}" style="font-weight:600"></div>
@@ -1049,15 +1061,25 @@ async function orgsTool(root, arg) {
         <div class="field"><label for="ono">Notes</label><textarea id="ono">${esc(o.notes)}</textarea></div></fieldset>
       <div class="field"><span class="label">Scans</span><div>${sitesOf(o.id).map(x => `<button type="button" class="linkbtn" data-site="${esc(x.id)}" title="Open ${esc(x.name)} in the main window">${esc(x.name)}</button> <span class="note mono">${esc(x.range)}</span>`).join("<br>")
         || '<span class="note">None yet: run a survey, or save a scan to this organization (File › Save Scan…).</span>'}</div></div>
-      <div class="bar"><div class="segmented" id="ofilter">${[["everything", "Everything"], ["scans", "Scans"], ["dns", "DNS"], ["ports", "Ports"], ["other", "Other"]].map(([k, t]) =>
-        `<button type="button" data-f="${k}" class="${filter === k ? "on" : ""}">${t}${counts[k] ? ` (${counts[k]})` : ""}</button>`).join("")}</div><span class="grow"></span>
-        <button type="button" id="onscan">+ New Network Scan</button><button type="button" id="ondns">+ New DNS Lookup</button>
-        <button type="button" id="onports" class="advanced-only">+ New Port Scan</button><button type="button" id="onother">+ New… ▾</button></div>
+      <div class="bar"><div class="segmented" id="ofilter">${TABS.map(([k, t]) =>
+        `<button type="button" data-f="${k}" class="${filter === k ? "on" : ""}">${t}${counts[k] ? ` (${counts[k]})` : ""}</button>`).join("")}</div>
+        ${filter === "dns" ? `<div class="segmented small" id="odnspart" title="Lookups: DNS lookups, email checks, server comparisons and reverse lookups. Expiry: domain and certificate expiry checks.">
+          <button type="button" data-p="lookups" class="${dnsPart === "lookups" ? "on" : ""}">Lookups (${dnsCount - expiryCount})</button><button type="button" data-p="expiry" class="${dnsPart === "expiry" ? "on" : ""}">Expiry (${expiryCount})</button></div>` : ""}
+        <span class="grow"></span>
+        ${filter === "surveys" ? '<button type="button" id="onsurvey" title="Runs a survey for this organization. Click a survey to show or hide what it found.">+ New Site Survey</button>' : ""}
+        ${filter === "scans" ? '<button type="button" id="onscan">+ New Network Scan</button>' : ""}
+        ${filter === "dns" && dnsPart === "lookups" ? '<button type="button" id="ondns">+ New DNS Lookup</button>' : ""}
+        ${filter === "dns" && dnsPart === "expiry" ? `<button type="button" id="onexpiry">+ New Expiry Check${o.domains.length > 1 ? " ▾" : ""}</button>` : ""}
+        ${filter === "ports" ? '<button type="button" id="onports" class="advanced-only">+ New Port Scan</button>' : ""}
+        ${filter === "heatmaps" ? '<button type="button" id="onheat" title="Opens Wi-Fi Heatmap. Save the result to this organization from there.">+ New Wi-Fi Heatmap</button>' : ""}
+        ${filter === "other" ? '<button type="button" id="onother">+ New… ▾</button>' : ""}</div>
       <div class="tablebox"><table class="tt"><thead><tr><th>When</th><th>Saved</th><th>Result</th></tr></thead><tbody id="oitems">
-        ${shown.map(({ item: i, indented }) => `<tr data-item="${esc(i.id)}" class="${picked.has(i.id) ? "sel" : ""}" style="cursor:default">
+        ${shown.map(({ item: i, indented }) => { const head = filter === "surveys" && i.kind === "survey", open = expanded.has(i.id), n = head ? surveyResultCount(i, all) : 0;
+          return `<tr data-item="${esc(i.id)}" class="${picked.has(i.id) ? "sel" : ""}" style="cursor:default">
           <td style="white-space:nowrap">${indented ? "" : esc(fmtD(i.date))}</td>
-          <td style="${indented ? "padding-left:24px" : ""}">${i.kind === "survey" ? '<span class="badge me">survey</span> ' : ""}${esc(i.title)}${i.note ? `<br><i class="note">“${esc(i.note)}”</i>` : ""}</td>
-          <td class="note">${esc(i.summary)}</td></tr>`).join("") || `<tr><td colspan="3" class="note">${all.length ? "Nothing of this kind saved." : "Nothing saved yet. Run a survey, or use Save to Organization in a tool."}</td></tr>`}
+          <td style="${indented ? "padding-left:50px" : ""}">${head ? `<button type="button" class="ochev" data-toggle="${esc(i.id)}" aria-label="${open ? "Hide results" : "Show results"}" title="${open ? "Hide what this survey found" : "Show what this survey found"}">${open ? "▾" : "▸"}</button> ` : ""}${esc(i.title)}${head ? ` <span class="note">${n} result${n === 1 ? "" : "s"}</span>` : ""}${i.note ? `<br><i class="note">“${esc(i.note)}”</i>` : ""}</td>
+          <td class="note">${esc(i.summary)}</td></tr>`; }).join("")
+          || `<tr><td colspan="3" class="note">${filter === "surveys" ? "No site surveys yet. Click New Site Survey to run one." : `Nothing saved under ${esc(filter === "dns" ? (dnsPart === "expiry" ? "Expiry" : "DNS Lookups") : tabLabel)}.`}</td></tr>`}
       </tbody></table></div>
       <div class="bar"><button type="button" id="oopen" ${picked.size ? "" : "disabled"}>Open</button><button type="button" id="onote" ${picked.size === 1 ? "" : "disabled"}>Edit Note…</button>
         <button type="button" id="odel" ${picked.size ? "" : "disabled"} title="Deletes the saved results selected in the list (not the organization)">Delete…</button>
@@ -1074,18 +1096,34 @@ async function orgsTool(root, arg) {
     for (const id of ["on", "od", "ono", "ons", "odh", "osnmp"]) $(id).oninput = field;
     $("odetail").querySelectorAll("[data-site]").forEach(b => b.onclick = () => act("open-site", b.dataset.site));
     $("ofilter").onclick = e => { const b = e.target.closest("[data-f]"); if (b) { filter = b.dataset.f; picked.clear(); drawDetail(); } };
-    $("onscan").onclick = () => act("new-scan-for-org", o.id);
+    if ($("odnspart")) $("odnspart").onclick = e => { const b = e.target.closest("[data-p]"); if (b) { dnsPart = b.dataset.p; picked.clear(); drawDetail(); } };
+    if ($("onsurvey")) $("onsurvey").onclick = () => act("run-survey", o.id);
+    if ($("onheat")) $("onheat").onclick = () => openFor("heatmap");
+    if ($("onscan")) $("onscan").onclick = () => act("new-scan-for-org", o.id);
     $("ounifi").onclick = () => act("unifi-setup", o.id);
     $("oquiet").onclick = e => { const b = e.target.closest("[data-q]"); if (!b) return;
       const on = b.dataset.q === "1";
       Orgs.mutate(d => { const x = d.orgs.find(y => y.id === o.id); if (x) x.quietScan = on; }).then(() => { o.quietScan = on; drawDetail(); }); };
-    $("onscan").title = `Opens a new scan in the main window. Each time it finishes, it’s saved here.`;
-    $("ondns").title = `Each lookup is saved here when it finishes.`;
+    if ($("onscan")) $("onscan").title = `Opens a new scan in the main window. Each time it finishes, it’s saved here.`;
+    if ($("ondns")) $("ondns").title = `Each lookup is saved here when it finishes.`;
     // Anything started here is saved to this organization automatically when it finishes.
     const openFor = (tool, a) => { OrgLaunch.mark(o.id); return invoke("open_tool", { tool, arg: a || null }); };
-    $("onports").onclick = () => act("port-scan-for-org", o.id);
-    $("onports").title = "Asks for an IP address, then scans its ports. Saved here when it finishes.";
-    $("onother").onclick = () => {
+    if ($("onports")) { $("onports").onclick = () => act("port-scan-for-org", o.id); $("onports").title = "Asks for an IP address, then scans its ports. Saved here when it finishes."; }
+    const domainMenu = (anchor, other, run) => {
+      const m = document.createElement("div"); m.className = "menu";
+      m.innerHTML = o.domains.map(dm => `<button type="button" data-d="${esc(dm)}">${esc(dm)}</button>`).join("") + `<hr><button type="button" data-d="">${other}</button>`;
+      document.body.appendChild(m);
+      const r = anchor.getBoundingClientRect(); m.style.left = `${Math.min(r.left, innerWidth - m.offsetWidth - 8)}px`; m.style.top = `${r.bottom + 2}px`;
+      const close = () => { m.remove(); document.removeEventListener("click", close); };
+      setTimeout(() => document.addEventListener("click", close), 0);
+      m.onclick = e => { const b = e.target.closest("[data-d]"); if (b) { close(); run(b.dataset.d); } };
+    };
+    // New Expiry Check: DNS Lookup opens on Expiry and checks the domain right away; the result is saved here.
+    if ($("onexpiry")) {
+      $("onexpiry").title = o.domains[0] ? `Checks when ${o.domains[0]} and its HTTPS certificates expire, and saves the result here automatically.` : "Opens DNS Lookup on Expiry. Each finished check is saved here automatically.";
+      $("onexpiry").onclick = e => o.domains.length > 1 ? domainMenu(e.currentTarget, "Other Domain…", d => openFor("dns", "expiry:" + d)) : openFor("dns", "expiry:" + (o.domains[0] || ""));
+    }
+    if ($("onother")) $("onother").onclick = () => {
       const m = document.createElement("div"); m.className = "menu";
       const list = [["ping", "Ping…"], ["trace", "Traceroute…"], ["speed", "Speed Test"], ["connection", "Connection Info"], ["wifi", "Wi-Fi Signal"], ["analyzer", "Wi-Fi Analyzer"]];
       m.innerHTML = list.map(([t, l]) => `<button type="button" data-t="${t}">${l}</button>`).join("") + `<hr><div class="heading" style="white-space:normal;max-width:240px">Saved here when they finish. Ping and Wi-Fi keep running: save them with their Save to Organization button.</div>`;
@@ -1095,21 +1133,20 @@ async function orgsTool(root, arg) {
       setTimeout(() => document.addEventListener("click", close), 0);
       m.onclick = e => { const b = e.target.closest("[data-t]"); if (b) { close(); openFor(b.dataset.t); } };
     };
-    $("ondns").onclick = () => {
-      if (o.domains.length <= 1) return openFor("dns", o.domains[0]);
-      const m = document.createElement("div"); m.className = "menu";
-      m.innerHTML = o.domains.map(dm => `<button type="button" data-d="${esc(dm)}">${esc(dm)}</button>`).join("") + `<hr><button type="button" data-d="">Other Name…</button>`;
-      document.body.appendChild(m);
-      const r = $("ondns").getBoundingClientRect(); m.style.left = `${Math.min(r.left, innerWidth - m.offsetWidth - 8)}px`; m.style.top = `${r.bottom + 2}px`;
-      const close = () => { m.remove(); document.removeEventListener("click", close); };
-      setTimeout(() => document.addEventListener("click", close), 0);
-      m.onclick = e => { const b = e.target.closest("[data-d]"); if (b) { close(); openFor("dns", b.dataset.d); } };
-    };
-    $("oitems").onclick = e => { const tr = e.target.closest("[data-item]"); if (!tr) return;
-      if (e.ctrlKey || e.metaKey) picked.has(tr.dataset.item) ? picked.delete(tr.dataset.item) : picked.add(tr.dataset.item); else picked = new Set([tr.dataset.item]);
+    if ($("ondns")) $("ondns").onclick = e => o.domains.length <= 1 ? openFor("dns", o.domains[0]) : domainMenu(e.currentTarget, "Other Name…", d => openFor("dns", d));
+    $("oitems").onclick = e => {
+      // A survey's arrow opens and closes it; clicking (selecting) a closed survey opens its results.
+      const t = e.target.closest("[data-toggle]");
+      if (t) { expanded.has(t.dataset.toggle) ? expanded.delete(t.dataset.toggle) : expanded.add(t.dataset.toggle); drawDetail(); return; }
+      const tr = e.target.closest("[data-item]"); if (!tr) return;
+      const id = tr.dataset.item;
+      if (e.ctrlKey || e.metaKey) picked.has(id) ? picked.delete(id) : picked.add(id);
+      else { if (filter === "surveys" && Orgs.item(id)?.kind === "survey" && !picked.has(id)) expanded.add(id); picked = new Set([id]); }
       drawDetail(); };
-    $("oitems").ondblclick = e => { const tr = e.target.closest("[data-item]"); if (tr) itemView(tr.dataset.item); };
-    $("oopen").onclick = () => [...picked].forEach(itemView);
+    // A saved Wi-Fi heatmap opens in the Wi-Fi Heatmap window (floor plan and all, ready to measure more).
+    const openItem = id => { const it = Orgs.item(id); if (it?.kind === "heatmap" && it.heatmapID) invoke("open_tool", { tool: "heatmap", arg: "heatmap:" + it.heatmapID }); else itemView(id); };
+    $("oitems").ondblclick = e => { if (e.target.closest("[data-toggle]")) return; const tr = e.target.closest("[data-item]"); if (tr) openItem(tr.dataset.item); };
+    $("oopen").onclick = () => [...picked].slice(0, 5).forEach(openItem);
     $("onote").onclick = () => {
       const it = Orgs.item([...picked][0]); if (!it) return;
       ask(`Note for “${it.title}”`, it.note, v => Orgs.mutate(d => { const x = d.items.find(y => y.id === it.id); if (x) x.note = v.trim(); }));
@@ -1125,7 +1162,7 @@ async function orgsTool(root, arg) {
     });
   };
   const draw = () => { drawList(); drawDetail(); };
-  $("olist").onclick = e => { const b = e.target.closest("[data-id]"); if (b) { selected = b.dataset.id; picked.clear(); draw(); } };
+  $("olist").onclick = e => { const b = e.target.closest("[data-id]"); if (b && b.dataset.id !== selected) { selected = b.dataset.id; picked.clear(); expanded.clear(); filter = "surveys"; dnsPart = "lookups"; draw(); } };
   $("oadd").onclick = () => act("new-org");
   // Redraw when another window changes organizations or saved scans (but not while typing in this one).
   const redraw = async () => { if (document.activeElement && ["on", "od", "ono", "ons", "odh"].includes(document.activeElement.id)) { drawList(); return; } await loadSites(); if (!Orgs.org(selected)) selected = Orgs.list[0]?.id || null; draw(); };
@@ -1133,7 +1170,7 @@ async function orgsTool(root, arg) {
   T.event.listen("sites-changed", redraw);
   T.event.listen("unifi-changed", async () => { await loadUnifi(); draw(); });
   draw();
-  return id => { selected = id; picked.clear(); draw(); };
+  return id => { selected = id; picked.clear(); expanded.clear(); filter = "surveys"; dnsPart = "lookups"; draw(); };
 }
 
 function confirmIt(title, text, action, run) {
@@ -1161,7 +1198,7 @@ function itemView(id) {
   const m = document.createElement("div"); m.className = "backdrop";
   m.innerHTML = `<div class="modal wide" style="width:min(1100px, calc(100vw - 32px));height:calc(100vh - 60px)">
     <div class="bar"><h2 class="grow" style="margin:0">${esc(it.title)}</h2>${it.kind === "dns" ? '<label class="check"><input type="checkbox" id="ivf"> Follow CNAMEs to other domains</label>' : ""}
-      <button type="button" id="ivcsv">Download CSV…</button><button type="button" id="ivxls">Download Excel (.xlsx)…</button><button type="button" class="primary" id="ivclose">Close</button></div>
+      ${it.kind === "heatmap" && it.heatmapID ? '<button type="button" id="ivheat" title="Open it in Wi-Fi Heatmap, with its floor plan, to look at or measure more">Open Heatmap</button>' : ""}<button type="button" id="ivcsv">Download CSV…</button><button type="button" id="ivxls">Download Excel (.xlsx)…</button><button type="button" class="primary" id="ivclose">Close</button></div>
     <p class="note" style="margin:0">${esc([o?.name, it.siteName && it.siteName !== o?.name ? it.siteName : "", new Date(it.date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }), it.summary].filter(Boolean).join(" · "))}</p>
     ${it.note ? `<p style="margin:0"><i>“${esc(it.note)}”</i></p>` : ""}<p class="note" id="ivhint" style="margin:0" hidden>This lookup was saved without where its CNAMEs lead. Look it up again in DNS Lookup to see them.</p>
     <div class="tablebox" style="flex:1" id="ivtable"><table class="tt"><thead><tr id="ivh"></tr></thead><tbody id="ivb"></tbody></table></div>
@@ -1185,6 +1222,7 @@ function itemView(id) {
   q("#ivcsv").onclick = () => download("csv", base, table().header, table().rows).catch(() => {});
   q("#ivxls").onclick = () => download("xlsx", base, table().header, table().rows, KINDS[it.kind]?.title).catch(() => {});
   q("#ivclose").onclick = () => m.remove();
+  if (q("#ivheat")) q("#ivheat").onclick = () => { m.remove(); invoke("open_tool", { tool: "heatmap", arg: "heatmap:" + it.heatmapID }); };
   m.addEventListener("keydown", e => { if (e.key === "Escape") m.remove(); });
   draw();
 }

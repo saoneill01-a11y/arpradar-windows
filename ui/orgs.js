@@ -16,6 +16,21 @@ const csvText = (header, rows) => [header, ...rows].map(r => r.map(csvCell).join
 /// One cell of tab-separated text for the clipboard: tabs and line breaks inside it become spaces.
 const tsvCell = v => String(v ?? "").replace(/[\t\r\n]+/g, " ");
 
+/// The Site Surveys tab: each survey (newest first), followed by its results (oldest first) when it's open.
+function surveyRows(list, expanded) {
+  const out = [];
+  for (const s of list.filter(i => i.kind === "survey").sort((a, b) => b.date.localeCompare(a.date))) {
+    out.push({ item: s, indented: false });
+    if (!expanded.has(s.id) || !s.surveyID) continue;
+    for (const c of list.filter(i => i.surveyID === s.surveyID && i.kind !== "survey").sort((a, b) => a.date.localeCompare(b.date))) out.push({ item: c, indented: true });
+  }
+  return out;
+}
+/// How many results a survey filed.
+const surveyResultCount = (survey, list) => survey.surveyID ? list.filter(i => i.surveyID === survey.surveyID && i.kind !== "survey").length : 0;
+/// The DNS tab's Expiry side: domain and certificate expiry checks (the rest of DNS is Lookups).
+const isExpiryCheck = i => i.kind === "dns" && String(i.title || "").startsWith("Domain and certificate expiry");
+
 /// An organization's entry for a Wi-Fi heatmap: by its link, else (saved before heatmaps were linked) by its title.
 /// Index in `list`, or -1. Saving the heatmap again updates that entry instead of adding another.
 function heatmapEntry(heatmap, title, org, list) {
@@ -126,7 +141,7 @@ const Orgs = (() => {
 // MARK: Saved item kinds and turning each tool's results into a table (the Mac's OrgDrafts.swift)
 
 const KINDS = {
-  survey: { title: "Site survey", group: "scans" }, networkScan: { title: "Network scan", group: "scans" },
+  survey: { title: "Site survey", group: "surveys" }, networkScan: { title: "Network scan", group: "scans" },
   dns: { title: "DNS lookup", group: "dns" }, portScan: { title: "Scan Ports", group: "ports" },
   traceroute: { title: "Traceroute", group: "other" }, ping: { title: "Ping", group: "other" },
   speedTest: { title: "Speed test", group: "other" }, wifi: { title: "Wi-Fi survey", group: "other" },

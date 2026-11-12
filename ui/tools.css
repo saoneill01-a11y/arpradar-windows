@@ -159,3 +159,4 @@ body.heatwin .toolpage { padding: 0; gap: 0; height: 100vh; min-height: 0; }
 .hm-cwhite { background: #fff; } #cplan { outline: 1px dashed var(--green); cursor: move; touch-action: none; }
 .hm-cgrid { display: grid; grid-template-columns: 50px 1fr 230px; gap: 6px 10px; align-items: center; }
 .hm-composer .buttons .left { margin-right: auto; }
+.ochev { background: none; border: 0; color: var(--muted); width: 16px; padding: 0; cursor: pointer; }
