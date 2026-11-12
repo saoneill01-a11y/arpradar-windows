@@ -68,6 +68,8 @@ struct State {
     /// Key of the last accepted command: events are sealed with it.
     key: Option<Secret>,
     busy: bool,
+    /// A survey (Wi-Fi readings for a walking heatmap) is running.
+    surveying: bool,
     cancel: Arc<AtomicBool>,
 }
 
@@ -122,7 +124,7 @@ async fn run() -> bluer::Result<()> {
         .await?;
 
     let owner = load_owner();
-    let mut st = State { owner, claim: None, claim_pub: [0; 32], nonce: link::random(), key: None, busy: false, cancel: Arc::new(AtomicBool::new(false)) };
+    let mut st = State { owner, claim: None, claim_pub: [0; 32], nonce: link::random(), key: None, busy: false, surveying: false, cancel: Arc::new(AtomicBool::new(false)) };
     if st.owner.is_none() {
         st.new_claim_key();
     }
@@ -265,10 +267,10 @@ fn send(tx: &mpsc::Sender<serde_json::Value>, v: serde_json::Value) {
 fn handle(cmd: Command, s: &mut State, shared: &Arc<Mutex<State>>, tx: mpsc::Sender<serde_json::Value>) {
     match cmd {
         Command::Status => {
-            let busy = s.busy;
+            let (busy, surveying) = (s.busy, s.surveying);
             tokio::task::spawn_blocking(move || {
                 let (ssid, ip) = crate::wifi::current();
-                send(&tx, json!({"type": "status", "ssid": ssid, "ip": ip, "busy": busy, "version": env!("CARGO_PKG_VERSION")}));
+                send(&tx, json!({"type": "status", "ssid": ssid, "ip": ip, "busy": busy, "surveying": surveying, "version": env!("CARGO_PKG_VERSION")}));
             });
         }
         Command::Networks => {
@@ -282,9 +284,11 @@ fn handle(cmd: Command, s: &mut State, shared: &Arc<Mutex<State>>, tx: mpsc::Sen
             eprintln!("released: the next app to connect becomes the owner");
             send(&tx, json!({"type": "released"}));
         }
+        Command::Survey { interval_ms } => start_survey(interval_ms, s, shared, tx),
         Command::Scan { range: r, quiet, community, ssid, password } => {
             if s.busy {
-                return send(&tx, json!({"type": "error", "text": "A scan is already running."}));
+                let text = if s.surveying { "A Wi-Fi survey is running. Stop it first." } else { "A scan is already running." };
+                return send(&tx, json!({"type": "error", "text": text}));
             }
             s.busy = true;
             s.cancel = Arc::new(AtomicBool::new(false));
@@ -297,6 +301,29 @@ fn handle(cmd: Command, s: &mut State, shared: &Arc<Mutex<State>>, tx: mpsc::Sen
             });
         }
     }
+}
+
+fn start_survey(interval_ms: u32, s: &mut State, shared: &Arc<Mutex<State>>, tx: mpsc::Sender<serde_json::Value>) {
+    if s.busy {
+        let text = if s.surveying { "A Wi-Fi survey is already running." } else { "A scan is running. Stop it first." };
+        return send(&tx, json!({"type": "error", "text": text}));
+    }
+    s.busy = true;
+    s.surveying = true;
+    s.cancel = Arc::new(AtomicBool::new(false));
+    let cancel = s.cancel.clone();
+    let shared = shared.clone();
+    tokio::task::spawn_blocking(move || {
+        // Readings are only useful fresh: if Bluetooth falls behind, drop rather than queue.
+        crate::survey::run(interval_ms, &cancel, &|v| {
+            if v["type"] == "surveyStopped" {
+                let mut st = shared.lock().unwrap();
+                st.busy = false;
+                st.surveying = false;
+            }
+            send(&tx, v)
+        });
+    });
 }
 
 /// The one-step scan: join the given Wi-Fi (if any), scan, report, then leave that Wi-Fi and delete it.

@@ -1,6 +1,6 @@
 [package]
 name = "arpradar-sensor"
-version = "0.3.0"
+version = "0.4.0"
 description = "ARPradar's scan engine without a window, for the Raspberry Pi sensor and other Linux boxes"
 authors = ["Sean O'Neill"]
 license = "GPL-3.0-or-later"

@@ -146,7 +146,7 @@ impl Reassembler {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(tag = "cmd", rename_all = "camelCase")]
+#[serde(tag = "cmd", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Command {
     /// What the sensor is connected to and doing.
     Status,
@@ -161,6 +161,12 @@ pub enum Command {
         community: Option<String>,
         ssid: Option<String>,
         password: Option<String>,
+    },
+    /// Measure nearby Wi-Fi over and over until `cancel`, one "wifi" event per sweep (for a heatmap made while
+    /// walking). `intervalMs` is the least time between readings; 0 = as fast as the adapter goes. Busy meanwhile.
+    Survey {
+        #[serde(default)]
+        interval_ms: u32,
     },
     Cancel,
     /// Stop being this app's sensor: the next app to connect becomes the owner.
@@ -246,6 +252,18 @@ mod tests {
         assert_eq!(r.push(&[2, b'z']), None);
         assert_eq!(frames(b"hi", 20), vec![vec![3, b'h', b'i']]);
         assert_eq!(r.push(&[3, b'h', b'i']), Some(b"hi".to_vec()));
+    }
+
+    #[test]
+    fn survey_command_json() {
+        let c: Command = serde_json::from_str(r#"{"cmd":"survey","intervalMs":1500}"#).unwrap();
+        assert_eq!(c, Command::Survey { interval_ms: 1500 });
+        assert_eq!(serde_json::from_str::<Command>(r#"{"cmd":"survey"}"#).unwrap(), Command::Survey { interval_ms: 0 });
+        assert_eq!(serde_json::to_string(&Command::Survey { interval_ms: 0 }).unwrap(), r#"{"cmd":"survey","intervalMs":0}"#);
+        // The older commands are unchanged.
+        assert_eq!(serde_json::to_string(&Command::Cancel).unwrap(), r#"{"cmd":"cancel"}"#);
+        let scan: Command = serde_json::from_str(r#"{"cmd":"scan","quiet":true}"#).unwrap();
+        assert!(matches!(scan, Command::Scan { quiet: true, range: None, .. }));
     }
 
     #[test]

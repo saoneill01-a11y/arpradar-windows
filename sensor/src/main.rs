@@ -31,6 +31,7 @@ mod sys;
 mod unifi;
 
 mod link;
+mod survey;
 #[cfg(target_os = "linux")]
 mod ble;
 #[cfg(target_os = "linux")]

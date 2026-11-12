@@ -2,6 +2,7 @@
 #   sudo install -m 755 arpradar-sensor /usr/local/bin/
 #   sudo install -m 644 arpradar-sensor.service /etc/systemd/system/
 #   sudo systemctl enable --now arpradar-sensor
+# Runs as root: joining Wi-Fi (nmcli) and the Wi-Fi survey's `iw dev ... scan` both need it (iw: sudo apt install iw).
 # Forget the owner app: sudo arpradar-sensor release (or put an empty file named "reset" on the SD card)
 [Unit]
 Description=ARPradar sensor (Bluetooth)
